@@ -1,7 +1,8 @@
+import pandas as pd
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
-# Configuração da página
+# 1. Configuração da página
 st.set_page_config(
     page_title="Caderno Tático de Boxe", page_icon="🥊", layout="centered"
 )
@@ -9,14 +10,19 @@ st.set_page_config(
 st.title("🥊 Caderno Tático de Boxe")
 st.subheader("Dicas do Pantera & Anotações de Treino")
 
-# Conexão com o Google Sheets
+# 2. Conexão com o Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Carregar dados existentes
-# ttl=0 garante que os dados recarreguem imediatamente após salvar
-df_dicas = conn.read(ttl=0)
+# 3. Carregar dados existentes (garante que 'df_dicas' existe antes de ser usada)
+try:
+  df_dicas = conn.read(ttl=0)
+except Exception:
+  # Se a planilha estiver vazia, cria um DataFrame estruturado
+  df_dicas = pd.DataFrame(
+      columns=["titulo", "categoria", "descricao", "fonte"]
+  )
 
-# Formulário para cadastrar nova dica
+# 4. Formulário para cadastrar nova dica
 with st.expander("➕ Cadastrar Nova Dica / Conceito"):
   with st.form("form_dica", clear_on_submit=True):
     titulo = st.text_input("Título da Dica (ex: Ajuste no Cruzado de Esquerda)")
@@ -41,16 +47,15 @@ with st.expander("➕ Cadastrar Nova Dica / Conceito"):
 
     if submitted:
       if titulo and descricao:
-        # Criar novo registro
-        nova_dica = {
+        nova_dica = pd.DataFrame([{
             "titulo": titulo,
             "categoria": categoria,
             "descricao": descricao,
             "fonte": fonte,
-        }
+        }])
 
-        # Adicionar à lista e atualizar a planilha
-        df_atualizado = df_dicas._append(nova_dica, ignore_index=True)
+        # Concatena a nova dica ao DataFrame existente
+        df_atualizado = pd.concat([df_dicas, nova_dica], ignore_index=True)
         conn.update(data=df_atualizado)
 
         st.success("Dica salva na nuvem com sucesso!")
@@ -60,12 +65,11 @@ with st.expander("➕ Cadastrar Nova Dica / Conceito"):
 
 st.divider()
 
-# Filtros e Exibição
+# 5. Filtros e Exibição das Dicas
 if not df_dicas.empty and "categoria" in df_dicas.columns:
   st.sidebar.header("🔍 Filtros")
-  categorias_existentes = (
-      df_dicas["categoria"].dropna().unique().tolist()
-  )  filtro_cat = st.sidebar.selectbox(
+  categorias_existentes = df_dicas["categoria"].dropna().unique().tolist()
+  filtro_cat = st.sidebar.selectbox(
       "Filtrar por Categoria", ["Todas"] + categorias_existentes
   )
 
@@ -76,11 +80,14 @@ if not df_dicas.empty and "categoria" in df_dicas.columns:
 
   st.write(f"### 📋 Dicas Registradas ({len(dicas_filtradas)})")
 
-  # Exibir do mais recente para o mais antigo (ordem reversa)
+  # Exibe da mais recente para a mais antiga
   for idx, row in dicas_filtradas.iloc[::-1].iterrows():
     with st.container(border=True):
       st.markdown(f"#### {row['titulo']}")
-      st.caption(f"📌 **Categoria:** {row['categoria']} | 👤 **Fonte:** {row['fonte']}")
+      st.caption(
+          f"📌 **Categoria:** {row['categoria']} | 👤 **Fonte:**"
+          f" {row['fonte']}"
+      )
       st.write(row["descricao"])
 else:
   st.info("Nenhuma dica cadastrada ainda. Use o formulário acima para começar!")
