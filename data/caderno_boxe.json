@@ -1,5 +1,18 @@
 {
-  "anotacoes": [],
+  "anotacoes": [
+    {
+      "id": "20261001170702063775",
+      "tipo": "Dica",
+      "titulo": "Step-Jab + Pivô Lateral / Off-Axis",
+      "categoria": "Footwork / Movimentação",
+      "descricao": "1 - Step-Jab de Cobertura: Avance com o jab para cobrir/prender a visão do parceiro no centro.\n2 - Âncora Posterior: Ao conectar o jab, transfira o peso do corpo para a perna de trás por uma fração de segundo (ela funciona como a trava do movimento).\n3 - Pivô de Bússola: Com a perna traseira ancorada, desloque o pé da frente para a diagonal exterior dele e faça o pivô virando de frente para o oponente, saindo do campo de visão em ângulo de 90° ($off-axis$).\n4 - Punição: No espaço cego criado, conecte a combinação (ex: Direto no corpo + Cruzado na cabeça) enquanto o parceiro ainda tenta girar para te reencontrar.",
+      "fonte": "Yakute",
+      "link_video": "",
+      "dificuldade": "Difícil",
+      "favorito": false,
+      "data": "2026-10-01"
+    }
+  ],
   "combos": [],
   "defesas": [],
   "erros_sparring": [],
