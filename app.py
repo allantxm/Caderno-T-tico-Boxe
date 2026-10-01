@@ -1,12 +1,12 @@
-import base64
 import io
 import json
 from datetime import datetime
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 import pandas as pd
+import requests
 import streamlit as st
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
 
 
 # ============================================================
@@ -19,51 +19,9 @@ st.set_page_config(
     layout="wide",
 )
 
-st.markdown("""
-<style>
-    .main-title {
-        font-size: 2.2rem;
-        font-weight: 800;
-        margin-bottom: 0;
-    }
-
-    .subtitle {
-        color: #888;
-        margin-top: -8px;
-        margin-bottom: 25px;
-    }
-
-    .metric-card {
-        padding: 18px;
-        border-radius: 12px;
-        border: 1px solid rgba(128,128,128,.25);
-        text-align: center;
-    }
-
-    .metric-number {
-        font-size: 1.8rem;
-        font-weight: 800;
-    }
-
-    .metric-label {
-        color: #888;
-        font-size: .9rem;
-    }
-
-    .tag {
-        display: inline-block;
-        padding: 3px 9px;
-        border-radius: 20px;
-        border: 1px solid rgba(128,128,128,.3);
-        font-size: .8rem;
-        margin-right: 5px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 
 # ============================================================
-# MODELO DE DADOS
+# CONSTANTES
 # ============================================================
 
 COLUNAS = [
@@ -77,13 +35,6 @@ COLUNAS = [
     "dificuldade",
     "favorito",
     "data",
-]
-
-COLUNAS_ANTIGAS = [
-    "titulo",
-    "categoria",
-    "descricao",
-    "fonte",
 ]
 
 TIPOS = [
@@ -112,241 +63,223 @@ DIFICULDADES = [
     "Difícil",
 ]
 
+GITHUB_API = "https://api.github.com"
+
 
 # ============================================================
 # CONFIGURAÇÃO DO GITHUB
 # ============================================================
 
-GITHUB_API_URL = "https://api.github.com"
+def obter_config_github():
+    """
+    Lê as configurações do GitHub nos Secrets do Streamlit.
+    """
 
-
-def github_configurado():
-    """Verifica se os Secrets do GitHub estão configurados."""
-
-    return all(
-        chave in st.secrets
-        for chave in [
-            "GITHUB_TOKEN",
-            "GITHUB_REPO",
-            "GITHUB_FILE",
-        ]
+    token = st.secrets.get("GITHUB_TOKEN", "")
+    repo = st.secrets.get("GITHUB_REPO", "")
+    arquivo = st.secrets.get(
+        "GITHUB_FILE",
+        "data/caderno_boxe.json"
     )
 
-
-def github_headers():
-    """Cabeçalhos utilizados nas requisições à API do GitHub."""
-
-    return {
-        "Authorization": f"Bearer {st.secrets['GITHUB_TOKEN']}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "Caderno-Tatico-de-Boxe",
-    }
+    return token, repo, arquivo
 
 
 # ============================================================
-# FUNÇÕES DE DADOS
+# DATAFRAME
 # ============================================================
 
-def novo_id(df):
-    """Gera um ID numérico simples e único."""
+def criar_dataframe_vazio():
+    """
+    Cria um DataFrame vazio com todas as colunas necessárias.
+    """
 
-    if df.empty or "id" not in df.columns:
-        return 1
-
-    ids = pd.to_numeric(
-        df["id"],
-        errors="coerce"
-    ).dropna()
-
-    if ids.empty:
-        return 1
-
-    return int(ids.max()) + 1
+    return pd.DataFrame(columns=COLUNAS)
 
 
 def preparar_dataframe(df):
     """
-    Converte a planilha antiga ou nova
-    para o formato atual.
+    Garante que o DataFrame tenha todas as colunas esperadas
+    e converte dados antigos para o novo padrão.
     """
 
     if df is None:
-        return pd.DataFrame(columns=COLUNAS)
+        return criar_dataframe_vazio()
 
     df = df.copy()
 
-    # Padroniza os nomes das colunas
-    df.columns = (
-        df.columns.astype(str)
-        .str.strip()
-        .str.lower()
-    )
+    # --------------------------------------------------------
+    # Compatibilidade com modelo antigo
+    # --------------------------------------------------------
 
-    # ========================================================
-    # Compatibilidade com planilha antiga
-    # ========================================================
+    if len(df.columns) > 0:
 
-    if "titulo" not in df.columns:
-        df["titulo"] = ""
+        # Colunas antigas possíveis
+        if "descricao" not in df.columns:
+            df["descricao"] = ""
 
-    if "categoria" not in df.columns:
-        df["categoria"] = ""
+        if "fonte" not in df.columns:
+            df["fonte"] = ""
 
-    if "descricao" not in df.columns:
-        df["descricao"] = ""
+    # --------------------------------------------------------
+    # Criar colunas que não existem
+    # --------------------------------------------------------
 
-    if "fonte" not in df.columns:
-        df["fonte"] = ""
-
-    # ========================================================
-    # Adiciona colunas novas
-    # ========================================================
-
-    defaults = {
+    valores_padrao = {
         "id": "",
         "tipo": "Dica",
+        "titulo": "",
+        "categoria": "Outro",
+        "descricao": "",
+        "fonte": "",
         "link_video": "",
         "dificuldade": "Médio",
         "favorito": False,
         "data": "",
     }
 
-    for coluna, valor in defaults.items():
-
+    for coluna, valor in valores_padrao.items():
         if coluna not in df.columns:
             df[coluna] = valor
 
-    # Mantém somente o modelo atual
-    df = df[COLUNAS].copy()
+    # --------------------------------------------------------
+    # Selecionar somente as colunas oficiais
+    # --------------------------------------------------------
 
-    # Limpeza
-    df = df.fillna("")
+    df = df[COLUNAS]
 
-    # ========================================================
-    # IDs
-    # ========================================================
+    # --------------------------------------------------------
+    # Normalizar ID
+    # --------------------------------------------------------
 
-    ids = []
-    usado = set()
+    if len(df) > 0:
 
-    for valor in df["id"]:
+        ids = []
 
-        try:
+        for valor in df["id"]:
+            if pd.isna(valor) or str(valor).strip() == "":
+                ids.append("")
+            else:
+                ids.append(str(valor))
 
-            numero = int(float(valor))
+        df["id"] = ids
 
-            if numero <= 0 or numero in usado:
-                raise ValueError
+    # --------------------------------------------------------
+    # Gerar IDs ausentes
+    # --------------------------------------------------------
 
-        except Exception:
+    for indice in df.index:
 
-            numero = 1
+        if not str(df.at[indice, "id"]).strip():
+            df.at[indice, "id"] = (
+                datetime.now().strftime("%Y%m%d%H%M%S")
+                + "_"
+                + str(indice)
+            )
 
-            while numero in usado:
-                numero += 1
+    # --------------------------------------------------------
+    # Normalizar texto
+    # --------------------------------------------------------
 
-        usado.add(numero)
-        ids.append(numero)
+    for coluna in [
+        "tipo",
+        "titulo",
+        "categoria",
+        "descricao",
+        "fonte",
+        "link_video",
+        "dificuldade",
+        "data",
+    ]:
+        df[coluna] = df[coluna].fillna("").astype(str)
 
-    df["id"] = ids
+    # --------------------------------------------------------
+    # Normalizar favorito
+    # --------------------------------------------------------
 
-    # ========================================================
-    # Tipo
-    # ========================================================
+    def converter_favorito(valor):
 
-    df["tipo"] = df["tipo"].replace(
-        "",
-        "Dica"
-    )
+        if isinstance(valor, bool):
+            return valor
 
-    df.loc[
-        ~df["tipo"].isin(TIPOS),
-        "tipo"
-    ] = "Dica"
+        texto = str(valor).strip().lower()
 
-    # ========================================================
-    # Dificuldade
-    # ========================================================
+        return texto in [
+            "true",
+            "1",
+            "sim",
+            "yes",
+            "favorito",
+        ]
 
-    df["dificuldade"] = df["dificuldade"].replace(
-        "",
-        "Médio"
-    )
-
-    df.loc[
-        ~df["dificuldade"].isin(DIFICULDADES),
-        "dificuldade"
-    ] = "Médio"
-
-    # ========================================================
-    # Favorito
-    # ========================================================
-
-    df["favorito"] = df["favorito"].apply(
-        lambda x: (
-            True
-            if str(x).strip().lower()
-            in [
-                "true",
-                "1",
-                "sim",
-                "yes",
-                "⭐",
-            ]
-            else False
-        )
-    )
-
-    # ========================================================
-    # Data
-    # ========================================================
-
-    df["data"] = df["data"].astype(str)
+    df["favorito"] = df["favorito"].apply(converter_favorito)
 
     return df
 
 
 # ============================================================
-# EXCEL
+# JSON <-> DATAFRAME
 # ============================================================
 
-def gerar_excel(df):
-    """Gera o Excel em memória para download."""
-
-    output = io.BytesIO()
-
-    export_df = preparar_dataframe(df)
-
-    with pd.ExcelWriter(
-        output,
-        engine="openpyxl"
-    ):
-
-        export_df.to_excel(
-            output,
-            index=False,
-            sheet_name="Caderno Tático"
-        )
-
-    output.seek(0)
-
-    return output.getvalue()
-
-
-# ============================================================
-# CONVERSÃO DATAFRAME → JSON
-# ============================================================
-
-def df_para_json(df):
+def json_para_dataframe(dados):
     """
-    Converte o DataFrame para a estrutura
-    utilizada pelo caderno_boxe.json.
+    Converte a estrutura JSON do GitHub para um DataFrame único.
+    """
+
+    registros = []
+
+    if not isinstance(dados, dict):
+        return criar_dataframe_vazio()
+
+    # --------------------------------------------------------
+    # Categorias existentes no JSON
+    # --------------------------------------------------------
+
+    categorias_json = [
+        ("anotacoes", "Dica"),
+        ("combos", "Combo"),
+        ("defesas", "Defesa"),
+        ("erros_sparring", "Erro no Sparring"),
+        ("correcoes_professor", "Correção do Professor"),
+        ("treinos", "Treino"),
+    ]
+
+    for chave, tipo_padrao in categorias_json:
+
+        lista = dados.get(chave, [])
+
+        if not isinstance(lista, list):
+            continue
+
+        for item in lista:
+
+            if not isinstance(item, dict):
+                continue
+
+            registro = item.copy()
+
+            if not registro.get("tipo"):
+                registro["tipo"] = tipo_padrao
+
+            registros.append(registro)
+
+    if not registros:
+        return criar_dataframe_vazio()
+
+    return preparar_dataframe(
+        pd.DataFrame(registros)
+    )
+
+
+def dataframe_para_json(df):
+    """
+    Converte o DataFrame para o formato organizado
+    utilizado no arquivo JSON do GitHub.
     """
 
     df = preparar_dataframe(df)
 
-    dados = {
+    resultado = {
         "anotacoes": [],
         "combos": [],
         "defesas": [],
@@ -364,259 +297,339 @@ def df_para_json(df):
         "Treino": "treinos",
     }
 
-    for _, row in df.iterrows():
+    for _, linha in df.iterrows():
 
-        registro = {
-            "id": int(row["id"]),
-            "tipo": str(row["tipo"]),
-            "titulo": str(row["titulo"]),
-            "categoria": str(row["categoria"]),
-            "descricao": str(row["descricao"]),
-            "fonte": str(row["fonte"]),
-            "link_video": str(row["link_video"]),
-            "dificuldade": str(row["dificuldade"]),
-            "favorito": bool(row["favorito"]),
-            "data": str(row["data"]),
-        }
+        registro = {}
 
-        destino = mapa_tipos.get(
-            registro["tipo"],
+        for coluna in COLUNAS:
+
+            valor = linha[coluna]
+
+            if pd.isna(valor):
+                valor = ""
+
+            if coluna == "favorito":
+                valor = bool(valor)
+
+            else:
+                valor = str(valor)
+
+            registro[coluna] = valor
+
+        tipo = registro.get("tipo", "Dica")
+
+        chave = mapa_tipos.get(
+            tipo,
             "anotacoes"
         )
 
-        dados[destino].append(registro)
-
-    return dados
-
-
-# ============================================================
-# CONVERSÃO JSON → DATAFRAME
-# ============================================================
-
-def json_para_df(dados):
-    """
-    Converte o caderno_boxe.json para DataFrame.
-    """
-
-    registros = []
-
-    mapa_tipos = {
-        "anotacoes": "Dica",
-        "combos": "Combo",
-        "defesas": "Defesa",
-        "erros_sparring": "Erro no Sparring",
-        "correcoes_professor": "Correção do Professor",
-        "treinos": "Treino",
-    }
-
-    for chave, tipo_padrao in mapa_tipos.items():
-
-        lista = dados.get(
-            chave,
-            []
-        )
-
-        if not isinstance(lista, list):
-            continue
-
-        for registro in lista:
-
-            registro = registro.copy()
-
-            if not registro.get("tipo"):
-                registro["tipo"] = tipo_padrao
-
-            registros.append(registro)
-
-    if not registros:
-        return pd.DataFrame(columns=COLUNAS)
-
-    return preparar_dataframe(
-        pd.DataFrame(registros)
-    )
-
-
-# ============================================================
-# CARREGAR DO GITHUB
-# ============================================================
-
-def carregar_github():
-    """
-    Carrega o caderno_boxe.json diretamente do GitHub.
-    """
-
-    if not github_configurado():
-
-        return (
-            pd.DataFrame(columns=COLUNAS),
-            "Os Secrets do GitHub não estão configurados."
-        )
-
-    repo = st.secrets["GITHUB_REPO"]
-    arquivo = st.secrets["GITHUB_FILE"]
-
-    url = (
-        f"{GITHUB_API_URL}/repos/"
-        f"{repo}/contents/{arquivo}"
-    )
-
-    try:
-
-        request = Request(
-            url,
-            headers=github_headers(),
-            method="GET",
-        )
-
-        with urlopen(
-            request,
-            timeout=15
-        ) as response:
-
-            resultado = json.loads(
-                response.read().decode("utf-8")
-            )
-
-        conteudo_base64 = resultado["content"]
-
-        conteudo = base64.b64decode(
-            conteudo_base64
-        ).decode("utf-8")
-
-        dados = json.loads(
-            conteudo
-        )
-
-        return (
-            json_para_df(dados),
-            None,
-        )
-
-    except HTTPError as e:
-
-        if e.code == 404:
-
-            return (
-                pd.DataFrame(columns=COLUNAS),
-                "Arquivo do caderno não encontrado no GitHub."
-            )
-
-        return (
-            pd.DataFrame(columns=COLUNAS),
-            f"Erro do GitHub: HTTP {e.code}"
-        )
-
-    except Exception as e:
-
-        return (
-            pd.DataFrame(columns=COLUNAS),
-            str(e)
-        )
-
-
-# ============================================================
-# SALVAR NO GITHUB
-# ============================================================
-
-def salvar_github(df):
-    """
-    Salva o DataFrame inteiro no caderno_boxe.json
-    através da API do GitHub.
-    """
-
-    if not github_configurado():
-
-        raise Exception(
-            "Os Secrets do GitHub não estão configurados."
-        )
-
-    repo = st.secrets["GITHUB_REPO"]
-    arquivo = st.secrets["GITHUB_FILE"]
-
-    url = (
-        f"{GITHUB_API_URL}/repos/"
-        f"{repo}/contents/{arquivo}"
-    )
-
-    # ========================================================
-    # Busca o arquivo atual para obter o SHA
-    # ========================================================
-
-    request_get = Request(
-        url,
-        headers=github_headers(),
-        method="GET",
-    )
-
-    with urlopen(
-        request_get,
-        timeout=15
-    ) as response:
-
-        arquivo_atual = json.loads(
-            response.read().decode("utf-8")
-        )
-
-    sha = arquivo_atual["sha"]
-
-    # ========================================================
-    # Converte os dados para JSON
-    # ========================================================
-
-    dados = df_para_json(df)
-
-    conteudo_json = json.dumps(
-        dados,
-        ensure_ascii=False,
-        indent=2,
-    )
-
-    conteudo_base64 = base64.b64encode(
-        conteudo_json.encode("utf-8")
-    ).decode("utf-8")
-
-    # ========================================================
-    # Atualiza o arquivo
-    # ========================================================
-
-    payload = {
-        "message": "Atualizar Caderno Tático de Boxe",
-        "content": conteudo_base64,
-        "sha": sha,
-    }
-
-    body = json.dumps(
-        payload
-    ).encode("utf-8")
-
-    request_put = Request(
-        url,
-        data=body,
-        headers={
-            **github_headers(),
-            "Content-Type": "application/json",
-        },
-        method="PUT",
-    )
-
-    with urlopen(
-        request_put,
-        timeout=15
-    ) as response:
-
-        resultado = json.loads(
-            response.read().decode("utf-8")
-        )
+        resultado[chave].append(registro)
 
     return resultado
 
 
 # ============================================================
-# ADICIONAR REGISTRO
+# GITHUB
 # ============================================================
 
-def adicionar_registro(
-    df,
+def github_headers(token):
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def carregar_github():
+    """
+    Carrega o JSON diretamente do GitHub.
+    """
+
+    token, repo, arquivo = obter_config_github()
+
+    if not token or not repo:
+        return (
+            criar_dataframe_vazio(),
+            "GITHUB_TOKEN ou GITHUB_REPO não configurado."
+        )
+
+    url = (
+        f"{GITHUB_API}/repos/"
+        f"{repo}/contents/{arquivo}"
+    )
+
+    try:
+
+        resposta = requests.get(
+            url,
+            headers=github_headers(token),
+            timeout=20,
+        )
+
+        if resposta.status_code == 404:
+            return (
+                criar_dataframe_vazio(),
+                "Arquivo JSON não encontrado no GitHub."
+            )
+
+        resposta.raise_for_status()
+
+        dados = resposta.json()
+
+        conteudo = dados.get("content", "")
+
+        import base64
+
+        texto = base64.b64decode(
+            conteudo
+        ).decode("utf-8")
+
+        json_data = json.loads(texto)
+
+        df = json_para_dataframe(json_data)
+
+        return df, ""
+
+    except Exception as erro:
+
+        return (
+            criar_dataframe_vazio(),
+            f"Erro ao carregar GitHub: {erro}"
+        )
+
+
+def salvar_github(df):
+    """
+    Salva o DataFrame no JSON do GitHub.
+    """
+
+    token, repo, arquivo = obter_config_github()
+
+    if not token or not repo:
+        return False, "GITHUB_TOKEN ou GITHUB_REPO não configurado."
+
+    url = (
+        f"{GITHUB_API}/repos/"
+        f"{repo}/contents/{arquivo}"
+    )
+
+    try:
+
+        # ----------------------------------------------------
+        # Primeiro precisamos obter o SHA atual
+        # ----------------------------------------------------
+
+        resposta_get = requests.get(
+            url,
+            headers=github_headers(token),
+            timeout=20,
+        )
+
+        sha = None
+
+        if resposta_get.status_code == 200:
+
+            dados_arquivo = resposta_get.json()
+
+            sha = dados_arquivo.get("sha")
+
+        elif resposta_get.status_code != 404:
+
+            resposta_get.raise_for_status()
+
+        # ----------------------------------------------------
+        # Converter DataFrame para JSON
+        # ----------------------------------------------------
+
+        json_data = dataframe_para_json(df)
+
+        texto_json = json.dumps(
+            json_data,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        import base64
+
+        conteudo_base64 = base64.b64encode(
+            texto_json.encode("utf-8")
+        ).decode("utf-8")
+
+        payload = {
+            "message": "Atualiza Caderno Tático de Boxe",
+            "content": conteudo_base64,
+        }
+
+        if sha:
+            payload["sha"] = sha
+
+        # ----------------------------------------------------
+        # Enviar para GitHub
+        # ----------------------------------------------------
+
+        resposta_put = requests.put(
+            url,
+            headers=github_headers(token),
+            json=payload,
+            timeout=20,
+        )
+
+        resposta_put.raise_for_status()
+
+        return True, "Dados salvos no GitHub com sucesso."
+
+    except requests.exceptions.HTTPError as erro:
+
+        try:
+            detalhe = resposta_put.json()
+        except Exception:
+            detalhe = ""
+
+        return (
+            False,
+            f"Erro HTTP ao salvar GitHub: {erro} {detalhe}"
+        )
+
+    except Exception as erro:
+
+        return (
+            False,
+            f"Erro ao salvar GitHub: {erro}"
+        )
+
+
+# ============================================================
+# EXCEL
+# ============================================================
+
+def gerar_excel(df):
+    """
+    Gera o Excel usando openpyxl diretamente.
+
+    Isso evita o erro:
+    'At least one sheet must be visible'
+    """
+
+    export_df = preparar_dataframe(df)
+
+    # --------------------------------------------------------
+    # Criar workbook diretamente
+    # --------------------------------------------------------
+
+    wb = Workbook()
+
+    # O Workbook() já cria uma planilha visível.
+    ws = wb.active
+
+    ws.title = "Caderno Tático"
+
+    # --------------------------------------------------------
+    # Cabeçalho
+    # --------------------------------------------------------
+
+    ws.append(
+        list(export_df.columns)
+    )
+
+    # --------------------------------------------------------
+    # Dados
+    # --------------------------------------------------------
+
+    for linha in export_df.itertuples(
+        index=False,
+        name=None
+    ):
+        ws.append(
+            list(linha)
+        )
+
+    # --------------------------------------------------------
+    # Estilo do cabeçalho
+    # --------------------------------------------------------
+
+    for cell in ws[1]:
+
+        cell.font = Font(
+            bold=True
+        )
+
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center"
+        )
+
+    # --------------------------------------------------------
+    # Ajustar largura das colunas
+    # --------------------------------------------------------
+
+    larguras = {
+        "A": 24,
+        "B": 24,
+        "C": 35,
+        "D": 30,
+        "E": 70,
+        "F": 30,
+        "G": 50,
+        "H": 15,
+        "I": 12,
+        "J": 20,
+    }
+
+    for coluna, largura in larguras.items():
+
+        ws.column_dimensions[
+            coluna
+        ].width = largura
+
+    # --------------------------------------------------------
+    # Congelar cabeçalho
+    # --------------------------------------------------------
+
+    ws.freeze_panes = "A2"
+
+    # --------------------------------------------------------
+    # Salvar em memória
+    # --------------------------------------------------------
+
+    output = io.BytesIO()
+
+    wb.save(output)
+
+    output.seek(0)
+
+    return output.getvalue()
+
+
+# ============================================================
+# FUNÇÕES AUXILIARES
+# ============================================================
+
+def gerar_id():
+    return (
+        datetime.now().strftime(
+            "%Y%m%d%H%M%S%f"
+        )
+    )
+
+
+def formatar_data(data):
+    if not data:
+        return ""
+
+    try:
+
+        data_obj = pd.to_datetime(data)
+
+        return data_obj.strftime(
+            "%d/%m/%Y"
+        )
+
+    except Exception:
+
+        return str(data)
+
+
+def salvar_registro(
     tipo,
     titulo,
     categoria,
@@ -626,66 +639,47 @@ def adicionar_registro(
     dificuldade,
     favorito,
 ):
-    """Adiciona uma anotação."""
-
-    registro = {
-        "id": novo_id(df),
+    novo = {
+        "id": gerar_id(),
         "tipo": tipo,
-        "titulo": titulo.strip(),
+        "titulo": titulo,
         "categoria": categoria,
-        "descricao": descricao.strip(),
-        "fonte": fonte.strip(),
-        "link_video": link_video.strip(),
+        "descricao": descricao,
+        "fonte": fonte,
+        "link_video": link_video,
         "dificuldade": dificuldade,
         "favorito": favorito,
         "data": datetime.now().strftime(
-            "%d/%m/%Y %H:%M"
+            "%Y-%m-%d"
         ),
     }
 
-    novo = pd.DataFrame(
-        [registro]
-    )
-
-    return pd.concat(
-        [df, novo],
-        ignore_index=True
-    )
+    return novo
 
 
 # ============================================================
-# MEMÓRIA DA SESSÃO
+# SESSION STATE
 # ============================================================
 
 if "df" not in st.session_state:
 
     df_inicial, erro = carregar_github()
 
-    st.session_state.df = df_inicial
+    st.session_state.df = preparar_dataframe(
+        df_inicial
+    )
+
     st.session_state.erro_conexao = erro
 
+
 if "pagina" not in st.session_state:
-    st.session_state.pagina = "🏠 Visão Geral"
+
+    st.session_state.pagina = "Visão Geral"
 
 
-# ============================================================
-# CABEÇALHO
-# ============================================================
+if "editando_id" not in st.session_state:
 
-st.markdown(
-    '<div class="main-title">'
-    '🥊 Caderno Tático de Boxe'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="subtitle">'
-    'Seu diário técnico de boxe, '
-    'combos, defesas e evolução nos treinos.'
-    '</div>',
-    unsafe_allow_html=True
-)
+    st.session_state.editando_id = None
 
 
 # ============================================================
@@ -694,7 +688,13 @@ st.markdown(
 
 with st.sidebar:
 
-    st.markdown("## 🥊 Navegação")
+    st.title("🥊 Caderno Tático")
+
+    st.caption(
+        "Seu diário pessoal de Boxe"
+    )
+
+    st.divider()
 
     paginas = [
         "🏠 Visão Geral",
@@ -707,950 +707,1027 @@ with st.sidebar:
         "⭐ Favoritos",
     ]
 
-    pagina = st.radio(
-        "Ir para",
-        paginas,
-        index=paginas.index(
-            st.session_state.pagina
-        ),
-    )
+    for pagina in paginas:
 
-    st.session_state.pagina = pagina
+        nome_pagina = pagina.split(
+            " ",
+            1
+        )[1]
+
+        if st.button(
+            pagina,
+            use_container_width=True,
+        ):
+
+            st.session_state.pagina = (
+                nome_pagina
+            )
+
+            st.session_state.editando_id = None
+
+            st.rerun()
 
     st.divider()
 
-    st.markdown("### 📁 Arquivos")
+    st.subheader("💾 Dados")
 
-    # ========================================================
-    # IMPORTAR EXCEL
-    # ========================================================
-
-    arquivo = st.file_uploader(
-        "Importar Excel",
-        type=["xlsx"],
-        help=(
-            "Aceita sua planilha antiga com "
-            "titulo, categoria, descricao e fonte."
-        ),
-    )
-
-    if arquivo is not None:
-
-        if st.button(
-            "📂 Carregar planilha",
-            use_container_width=True
-        ):
-
-            try:
-
-                df_importado = pd.read_excel(
-                    arquivo,
-                    sheet_name=0,
-                    engine="openpyxl"
-                )
-
-                st.session_state.df = preparar_dataframe(
-                    df_importado
-                )
-
-                st.success(
-                    f"{len(st.session_state.df)} "
-                    "anotações importadas."
-                )
-
-                st.rerun()
-
-            except Exception as e:
-
-                st.error(
-                    f"Erro ao importar: {e}"
-                )
-
-    # ========================================================
-    # EXPORTAR EXCEL
-    # ========================================================
-
-    st.download_button(
-        "📥 Exportar Excel",
-        data=gerar_excel(
-            st.session_state.df
-        ),
-        file_name="Caderno_Tatico_de_Boxe.xlsx",
-        mime=(
-            "application/vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
-        ),
-        use_container_width=True,
-    )
-
-    # ========================================================
-    # SALVAR NO GITHUB
-    # ========================================================
+    # --------------------------------------------------------
+    # Salvar GitHub
+    # --------------------------------------------------------
 
     if st.button(
         "💾 Salvar na nuvem",
-        use_container_width=True
+        use_container_width=True,
     ):
 
-        try:
+        sucesso, mensagem = salvar_github(
+            st.session_state.df
+        )
 
-            salvar_github(
-                st.session_state.df
+        if sucesso:
+            st.success(mensagem)
+
+        else:
+            st.error(mensagem)
+
+    # --------------------------------------------------------
+    # Recarregar GitHub
+    # --------------------------------------------------------
+
+    if st.button(
+        "🔄 Recarregar da nuvem",
+        use_container_width=True,
+    ):
+
+        df_novo, erro = carregar_github()
+
+        if erro:
+
+            st.error(erro)
+
+        else:
+
+            st.session_state.df = (
+                preparar_dataframe(df_novo)
             )
+
+            st.session_state.editando_id = None
 
             st.success(
-                "Dados salvos no GitHub com sucesso!"
+                "Dados recarregados."
             )
 
-        except Exception as e:
-
-            st.error(
-                "Não foi possível salvar no GitHub. "
-                f"Detalhes: {e}"
-            )
+            st.rerun()
 
     st.divider()
 
-    st.caption(
-        "💡 O GitHub armazena seu caderno "
-        "e o Excel funciona como backup."
+    # --------------------------------------------------------
+    # Importar Excel
+    # --------------------------------------------------------
+
+    arquivo_excel = st.file_uploader(
+        "📤 Importar Excel",
+        type=["xlsx"],
     )
 
+    if arquivo_excel is not None:
 
-df = preparar_dataframe(
-    st.session_state.df
-)
+        try:
 
+            df_importado = pd.read_excel(
+                arquivo_excel
+            )
 
-# ============================================================
-# FUNÇÃO PARA EDITAR
-# ============================================================
+            st.session_state.df = (
+                preparar_dataframe(
+                    df_importado
+                )
+            )
 
-def editar_registro(registro_id):
+            st.success(
+                "Excel importado."
+            )
 
-    registro = df[
-        df["id"] == registro_id
-    ]
+        except Exception as erro:
 
-    if registro.empty:
+            st.error(
+                f"Erro ao importar Excel: {erro}"
+            )
+
+    # --------------------------------------------------------
+    # Exportar Excel
+    # --------------------------------------------------------
+
+    try:
+
+        excel_bytes = gerar_excel(
+            st.session_state.df
+        )
+
+        st.download_button(
+            label="📥 Exportar Excel",
+            data=excel_bytes,
+            file_name="caderno_tatico_boxe.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-"
+                "officedocument.spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+
+    except Exception as erro:
 
         st.error(
-            "Anotação não encontrada."
+            f"Erro ao gerar Excel: {erro}"
+        )
+
+    # --------------------------------------------------------
+    # Erro de conexão
+    # --------------------------------------------------------
+
+    if st.session_state.get(
+        "erro_conexao"
+    ):
+
+        st.warning(
+            st.session_state.erro_conexao
+        )
+
+
+# ============================================================
+# FUNÇÃO DE LISTAGEM
+# ============================================================
+
+def mostrar_lista(
+    df,
+    titulo=None,
+    tipo_filtro=None,
+):
+    """
+    Exibe filtros e registros.
+    """
+
+    if titulo:
+
+        st.header(titulo)
+
+    if tipo_filtro:
+
+        df = df[
+            df["tipo"] == tipo_filtro
+        ].copy()
+
+    if len(df) == 0:
+
+        st.info(
+            "Nenhum registro encontrado."
         )
 
         return
 
-    row = registro.iloc[0]
+    # --------------------------------------------------------
+    # Filtros
+    # --------------------------------------------------------
 
-    st.markdown(
-        "### ✏️ Editar anotação"
+    col1, col2, col3, col4 = st.columns(
+        [2, 2, 2, 3]
+    )
+
+    with col1:
+
+        categorias_disponiveis = [
+            "Todas"
+        ] + sorted(
+            [
+                x
+                for x in df["categoria"].unique()
+                if x
+            ]
+        )
+
+        filtro_categoria = st.selectbox(
+            "Categoria",
+            categorias_disponiveis,
+            key=f"categoria_{titulo}_{tipo_filtro}",
+        )
+
+    with col2:
+
+        dificuldades_disponiveis = [
+            "Todas"
+        ] + DIFICULDADES
+
+        filtro_dificuldade = st.selectbox(
+            "Dificuldade",
+            dificuldades_disponiveis,
+            key=f"dificuldade_{titulo}_{tipo_filtro}",
+        )
+
+    with col3:
+
+        filtro_favoritos = st.selectbox(
+            "Favoritos",
+            [
+                "Todos",
+                "Somente favoritos",
+                "Não favoritos",
+            ],
+            key=f"favoritos_{titulo}_{tipo_filtro}",
+        )
+
+    with col4:
+
+        busca = st.text_input(
+            "🔎 Buscar",
+            placeholder=(
+                "Título, descrição, fonte..."
+            ),
+            key=f"busca_{titulo}_{tipo_filtro}",
+        )
+
+    # --------------------------------------------------------
+    # Aplicar filtros
+    # --------------------------------------------------------
+
+    resultado = df.copy()
+
+    if filtro_categoria != "Todas":
+
+        resultado = resultado[
+            resultado["categoria"]
+            == filtro_categoria
+        ]
+
+    if filtro_dificuldade != "Todas":
+
+        resultado = resultado[
+            resultado["dificuldade"]
+            == filtro_dificuldade
+        ]
+
+    if filtro_favoritos == "Somente favoritos":
+
+        resultado = resultado[
+            resultado["favorito"] == True
+        ]
+
+    elif filtro_favoritos == "Não favoritos":
+
+        resultado = resultado[
+            resultado["favorito"] == False
+        ]
+
+    if busca.strip():
+
+        termo = busca.lower().strip()
+
+        mascara = (
+            resultado["titulo"].str.lower().str.contains(
+                termo,
+                na=False
+            )
+            |
+            resultado["descricao"].str.lower().str.contains(
+                termo,
+                na=False
+            )
+            |
+            resultado["categoria"].str.lower().str.contains(
+                termo,
+                na=False
+            )
+            |
+            resultado["fonte"].str.lower().str.contains(
+                termo,
+                na=False
+            )
+        )
+
+        resultado = resultado[
+            mascara
+        ]
+
+    st.caption(
+        f"{len(resultado)} registro(s)"
+    )
+
+    # --------------------------------------------------------
+    # Exibir registros
+    # --------------------------------------------------------
+
+    for _, registro in resultado.iterrows():
+
+        favorito = (
+            "⭐"
+            if registro["favorito"]
+            else "☆"
+        )
+
+        with st.container(
+            border=True
+        ):
+
+            col_a, col_b = st.columns(
+                [6, 1]
+            )
+
+            with col_a:
+
+                st.subheader(
+                    f"{favorito} {registro['titulo']}"
+                )
+
+                info = (
+                    f"**{registro['categoria']}**"
+                )
+
+                if registro["dificuldade"]:
+
+                    info += (
+                        f" • {registro['dificuldade']}"
+                    )
+
+                if registro["data"]:
+
+                    info += (
+                        f" • {formatar_data(registro['data'])}"
+                    )
+
+                st.markdown(info)
+
+                if registro["descricao"]:
+
+                    st.write(
+                        registro["descricao"]
+                    )
+
+                if registro["fonte"]:
+
+                    st.caption(
+                        f"Fonte: {registro['fonte']}"
+                    )
+
+                if registro["link_video"]:
+
+                    st.link_button(
+                        "▶️ Abrir vídeo",
+                        registro["link_video"],
+                    )
+
+            with col_b:
+
+                if st.button(
+                    "✏️",
+                    key=f"editar_{registro['id']}",
+                    help="Editar",
+                ):
+
+                    st.session_state.editando_id = (
+                        registro["id"]
+                    )
+
+                    st.rerun()
+
+                if st.button(
+                    "🗑️",
+                    key=f"excluir_{registro['id']}",
+                    help="Excluir",
+                ):
+
+                    st.session_state.df = (
+                        st.session_state.df[
+                            st.session_state.df["id"]
+                            != registro["id"]
+                        ].reset_index(drop=True)
+                    )
+
+                    st.success(
+                        "Registro excluído."
+                    )
+
+                    st.rerun()
+
+
+# ============================================================
+# FORMULÁRIO DE NOVO REGISTRO
+# ============================================================
+
+def formulario_novo(tipo_padrao=None):
+
+    st.subheader(
+        "➕ Novo registro"
     )
 
     with st.form(
-        f"editar_{registro_id}"
-    ):
-
-        tipo = st.selectbox(
-            "Tipo",
-            TIPOS,
-            index=(
-                TIPOS.index(row["tipo"])
-                if row["tipo"] in TIPOS
-                else 0
-            ),
-        )
-
-        titulo = st.text_input(
-            "Título",
-            value=str(row["titulo"])
-        )
-
-        categoria = st.selectbox(
-            "Categoria",
-            CATEGORIAS,
-            index=(
-                CATEGORIAS.index(
-                    row["categoria"]
-                )
-                if row["categoria"]
-                in CATEGORIAS
-                else len(CATEGORIAS) - 1
-            ),
-        )
-
-        dificuldade = st.selectbox(
-            "Dificuldade",
-            DIFICULDADES,
-            index=(
-                DIFICULDADES.index(
-                    row["dificuldade"]
-                )
-                if row["dificuldade"]
-                in DIFICULDADES
-                else 1
-            ),
-        )
-
-        descricao = st.text_area(
-            "Descrição",
-            value=str(
-                row["descricao"]
-            ),
-            height=180
-        )
-
-        fonte = st.text_input(
-            "Fonte",
-            value=str(
-                row["fonte"]
-            )
-        )
-
-        link_video = st.text_input(
-            "Link de vídeo",
-            value=str(
-                row["link_video"]
-            )
-        )
-
-        favorito = st.checkbox(
-            "⭐ Favorito",
-            value=bool(
-                row["favorito"]
-            )
-        )
-
-        salvar = st.form_submit_button(
-            "💾 Salvar alterações",
-            use_container_width=True
-        )
-
-        if salvar:
-
-            if (
-                not titulo.strip()
-                or not descricao.strip()
-            ):
-
-                st.warning(
-                    "Título e descrição "
-                    "são obrigatórios."
-                )
-
-            else:
-
-                mask = (
-                    df["id"]
-                    == registro_id
-                )
-
-                df.loc[
-                    mask,
-                    "tipo"
-                ] = tipo
-
-                df.loc[
-                    mask,
-                    "titulo"
-                ] = titulo.strip()
-
-                df.loc[
-                    mask,
-                    "categoria"
-                ] = categoria
-
-                df.loc[
-                    mask,
-                    "dificuldade"
-                ] = dificuldade
-
-                df.loc[
-                    mask,
-                    "descricao"
-                ] = descricao.strip()
-
-                df.loc[
-                    mask,
-                    "fonte"
-                ] = fonte.strip()
-
-                df.loc[
-                    mask,
-                    "link_video"
-                ] = link_video.strip()
-
-                df.loc[
-                    mask,
-                    "favorito"
-                ] = favorito
-
-                st.session_state.df = df
-
-                st.success(
-                    "Anotação atualizada!"
-                )
-
-                st.rerun()
-
-
-# ============================================================
-# NOVA ANOTAÇÃO
-# ============================================================
-
-with st.expander(
-    "➕ Nova anotação",
-    expanded=False
-):
-
-    with st.form(
-        "nova_anotacao"
+        "form_novo_registro",
+        clear_on_submit=True,
     ):
 
         col1, col2 = st.columns(2)
 
         with col1:
 
-            tipo_novo = st.selectbox(
+            tipo = st.selectbox(
                 "Tipo",
                 TIPOS,
-            )
-
-            titulo_novo = st.text_input(
-                "Título",
-                placeholder=(
-                    "Ex: Jab + direto + gancho"
+                index=(
+                    TIPOS.index(tipo_padrao)
+                    if tipo_padrao in TIPOS
+                    else 0
                 ),
             )
 
-            categoria_nova = st.selectbox(
+            titulo = st.text_input(
+                "Título *"
+            )
+
+            categoria = st.selectbox(
                 "Categoria",
                 CATEGORIAS,
             )
 
-        with col2:
-
-            dificuldade_nova = st.selectbox(
+            dificuldade = st.selectbox(
                 "Dificuldade",
                 DIFICULDADES,
-                index=1,
             )
 
-            fonte_nova = st.text_input(
-                "Fonte",
-                placeholder=(
-                    "Ex: Professor, Pantera, treino..."
-                ),
+        with col2:
+
+            fonte = st.text_input(
+                "Fonte"
             )
 
-            link_novo = st.text_input(
-                "Link de vídeo",
-                placeholder="https://...",
+            link_video = st.text_input(
+                "Link do vídeo"
             )
 
-        descricao_nova = st.text_area(
-            "Descrição / Passo a passo",
-            placeholder=(
-                "Descreva a técnica, o erro, "
-                "a correção ou o treino..."
-            ),
-            height=150,
-        )
-
-        favorito_novo = st.checkbox(
-            "⭐ Adicionar aos favoritos"
-        )
-
-        criar = st.form_submit_button(
-            "🥊 Adicionar ao caderno",
-            use_container_width=True
-        )
-
-        if criar:
-
-            if not titulo_novo.strip():
-
-                st.warning(
-                    "Informe um título."
-                )
-
-            elif not descricao_nova.strip():
-
-                st.warning(
-                    "Informe uma descrição."
-                )
-
-            else:
-
-                st.session_state.df = (
-                    adicionar_registro(
-                        df,
-                        tipo_novo,
-                        titulo_novo,
-                        categoria_nova,
-                        descricao_nova,
-                        fonte_nova,
-                        link_novo,
-                        dificuldade_nova,
-                        favorito_novo,
-                    )
-                )
-
-                st.success(
-                    "Anotação adicionada "
-                    "ao caderno!"
-                )
-
-                st.rerun()
-
-
-# ============================================================
-# COMPONENTE DE LISTAGEM
-# ============================================================
-
-def mostrar_lista(
-    df_lista,
-    titulo_secao
-):
-
-    st.markdown(
-        f"## {titulo_secao}"
-    )
-
-    if df_lista.empty:
-
-        st.info(
-            "Nenhuma anotação encontrada."
-        )
-
-        return
-
-    busca = st.text_input(
-        "🔎 Buscar",
-        placeholder=(
-            "Digite uma palavra, técnica, "
-            "erro, professor..."
-        ),
-        key=f"busca_{titulo_secao}",
-    )
-
-    if busca.strip():
-
-        termo = busca.strip().lower()
-
-        mascara = (
-            df_lista[
-                "titulo"
-            ]
-            .astype(str)
-            .str.lower()
-            .str.contains(
-                termo,
-                na=False
+            favorito = st.checkbox(
+                "⭐ Favorito"
             )
-            |
-            df_lista[
-                "descricao"
-            ]
-            .astype(str)
-            .str.lower()
-            .str.contains(
-                termo,
-                na=False
-            )
-            |
-            df_lista[
-                "categoria"
-            ]
-            .astype(str)
-            .str.lower()
-            .str.contains(
-                termo,
-                na=False
-            )
-            |
-            df_lista[
-                "fonte"
-            ]
-            .astype(str)
-            .str.lower()
-            .str.contains(
-                termo,
-                na=False
-            )
+
+        descricao = st.text_area(
+            "Descrição / Anotação *",
+            height=180,
         )
 
-        df_lista = df_lista[
-            mascara
-        ]
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        filtro_categoria = st.selectbox(
-            "Categoria",
-            ["Todas"] + sorted(
-                [
-                    str(x)
-                    for x in
-                    df_lista[
-                        "categoria"
-                    ]
-                    .dropna()
-                    .unique()
-                    if str(x).strip()
-                ]
-            ),
-            key=f"cat_{titulo_secao}",
+        enviar = st.form_submit_button(
+            "➕ Adicionar registro",
+            use_container_width=True,
         )
 
-    with col2:
+    if enviar:
 
-        filtro_dificuldade = st.selectbox(
-            "Dificuldade",
-            ["Todas"] + DIFICULDADES,
-            key=f"dif_{titulo_secao}",
+        if not titulo.strip():
+
+            st.error(
+                "Preencha o título."
+            )
+
+            return
+
+        if not descricao.strip():
+
+            st.error(
+                "Preencha a descrição."
+            )
+
+            return
+
+        novo = salvar_registro(
+            tipo=tipo,
+            titulo=titulo.strip(),
+            categoria=categoria,
+            descricao=descricao.strip(),
+            fonte=fonte.strip(),
+            link_video=link_video.strip(),
+            dificuldade=dificuldade,
+            favorito=favorito,
         )
 
-    with col3:
+        novo_df = pd.DataFrame(
+            [novo]
+        )
 
-        filtro_favorito = st.selectbox(
-            "Favoritos",
+        st.session_state.df = pd.concat(
             [
-                "Todos",
-                "Somente favoritos"
+                st.session_state.df,
+                novo_df,
             ],
-            key=f"fav_{titulo_secao}",
+            ignore_index=True,
         )
 
-    if filtro_categoria != "Todas":
-
-        df_lista = df_lista[
-            df_lista[
-                "categoria"
-            ]
-            == filtro_categoria
-        ]
-
-    if filtro_dificuldade != "Todas":
-
-        df_lista = df_lista[
-            df_lista[
-                "dificuldade"
-            ]
-            == filtro_dificuldade
-        ]
-
-    if filtro_favorito == "Somente favoritos":
-
-        df_lista = df_lista[
-            df_lista[
-                "favorito"
-            ] == True
-        ]
-
-    st.caption(
-        f"{len(df_lista)} "
-        "anotação(ões) encontrada(s)"
-    )
-
-    for _, row in df_lista.iloc[::-1].iterrows():
-
-        with st.container(
-            border=True
-        ):
-
-            estrela = (
-                "⭐ "
-                if row["favorito"]
-                else ""
-            )
-
-            st.markdown(
-                f"### {estrela}"
-                f"{row['titulo']}"
-            )
-
-            st.markdown(
-                f'<span class="tag">'
-                f'{row["tipo"]}'
-                f'</span>'
-                f'<span class="tag">'
-                f'{row["categoria"]}'
-                f'</span>'
-                f'<span class="tag">'
-                f'{row["dificuldade"]}'
-                f'</span>',
-                unsafe_allow_html=True
-            )
-
-            st.write("")
-
-            st.write(
-                row["descricao"]
-            )
-
-            info = []
-
-            if row["fonte"]:
-
-                info.append(
-                    f"Fonte: {row['fonte']}"
-                )
-
-            if row["data"]:
-
-                info.append(
-                    f"Data: {row['data']}"
-                )
-
-            if info:
-
-                st.caption(
-                    " | ".join(info)
-                )
-
-            if row["link_video"]:
-
-                st.link_button(
-                    "🎥 Abrir vídeo",
-                    row["link_video"],
-                )
-
-            edit_col, delete_col = st.columns(2)
-
-            with edit_col:
-
-                if st.button(
-                    "✏️ Editar",
-                    key=f"editar_{row['id']}",
-                    use_container_width=True,
-                ):
-
-                    st.session_state.editando = int(
-                        row["id"]
-                    )
-
-                    st.rerun()
-
-            with delete_col:
-
-                if st.button(
-                    "🗑️ Excluir",
-                    key=f"excluir_{row['id']}",
-                    use_container_width=True,
-                ):
-
-                    st.session_state.confirmar_exclusao = int(
-                        row["id"]
-                    )
-
-                    st.rerun()
-
-
-# ============================================================
-# EXCLUSÃO
-# ============================================================
-
-if "confirmar_exclusao" in st.session_state:
-
-    excluir_id = (
-        st.session_state
-        .confirmar_exclusao
-    )
-
-    registro = df[
-        df["id"] == excluir_id
-    ]
-
-    if not registro.empty:
-
-        st.warning(
-            f'Excluir permanentemente '
-            f'"{registro.iloc[0]["titulo"]}"?'
+        st.success(
+            "Registro adicionado!"
         )
-
-        sim, nao = st.columns(2)
-
-        with sim:
-
-            if st.button(
-                "Sim, excluir",
-                type="primary",
-                use_container_width=True,
-            ):
-
-                st.session_state.df = (
-                    df[
-                        df["id"]
-                        != excluir_id
-                    ]
-                    .reset_index(
-                        drop=True
-                    )
-                )
-
-                del st.session_state.confirmar_exclusao
-
-                st.success(
-                    "Anotação excluída."
-                )
-
-                st.rerun()
-
-        with nao:
-
-            if st.button(
-                "Cancelar",
-                use_container_width=True,
-            ):
-
-                del st.session_state.confirmar_exclusao
-
-                st.rerun()
-
-
-# ============================================================
-# EDIÇÃO
-# ============================================================
-
-if "editando" in st.session_state:
-
-    editar_id = (
-        st.session_state.editando
-    )
-
-    editar_registro(
-        editar_id
-    )
-
-    if st.button(
-        "↩️ Voltar"
-    ):
-
-        del st.session_state.editando
 
         st.rerun()
 
-    st.stop()
+
+# ============================================================
+# FORMULÁRIO DE EDIÇÃO
+# ============================================================
+
+def formulario_edicao(registro):
+
+    st.subheader(
+        "✏️ Editar registro"
+    )
+
+    with st.form(
+        "form_edicao"
+    ):
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            tipo = st.selectbox(
+                "Tipo",
+                TIPOS,
+                index=(
+                    TIPOS.index(registro["tipo"])
+                    if registro["tipo"] in TIPOS
+                    else 0
+                ),
+            )
+
+            titulo = st.text_input(
+                "Título",
+                value=registro["titulo"],
+            )
+
+            categoria = st.selectbox(
+                "Categoria",
+                CATEGORIAS,
+                index=(
+                    CATEGORIAS.index(
+                        registro["categoria"]
+                    )
+                    if registro["categoria"]
+                    in CATEGORIAS
+                    else 0
+                ),
+            )
+
+            dificuldade = st.selectbox(
+                "Dificuldade",
+                DIFICULDADES,
+                index=(
+                    DIFICULDADES.index(
+                        registro["dificuldade"]
+                    )
+                    if registro["dificuldade"]
+                    in DIFICULDADES
+                    else 1
+                ),
+            )
+
+        with col2:
+
+            fonte = st.text_input(
+                "Fonte",
+                value=registro["fonte"],
+            )
+
+            link_video = st.text_input(
+                "Link do vídeo",
+                value=registro["link_video"],
+            )
+
+            favorito = st.checkbox(
+                "⭐ Favorito",
+                value=bool(
+                    registro["favorito"]
+                ),
+            )
+
+        descricao = st.text_area(
+            "Descrição / Anotação",
+            value=registro["descricao"],
+            height=180,
+        )
+
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+
+            salvar = st.form_submit_button(
+                "💾 Salvar alterações",
+                use_container_width=True,
+            )
+
+        with col_b:
+
+            cancelar = st.form_submit_button(
+                "❌ Cancelar",
+                use_container_width=True,
+            )
+
+    if cancelar:
+
+        st.session_state.editando_id = None
+
+        st.rerun()
+
+    if salvar:
+
+        if not titulo.strip():
+
+            st.error(
+                "Preencha o título."
+            )
+
+            return
+
+        if not descricao.strip():
+
+            st.error(
+                "Preencha a descrição."
+            )
+
+            return
+
+        indice = st.session_state.df.index[
+            st.session_state.df["id"]
+            == registro["id"]
+        ]
+
+        if len(indice) > 0:
+
+            i = indice[0]
+
+            st.session_state.df.at[
+                i,
+                "tipo"
+            ] = tipo
+
+            st.session_state.df.at[
+                i,
+                "titulo"
+            ] = titulo.strip()
+
+            st.session_state.df.at[
+                i,
+                "categoria"
+            ] = categoria
+
+            st.session_state.df.at[
+                i,
+                "descricao"
+            ] = descricao.strip()
+
+            st.session_state.df.at[
+                i,
+                "fonte"
+            ] = fonte.strip()
+
+            st.session_state.df.at[
+                i,
+                "link_video"
+            ] = link_video.strip()
+
+            st.session_state.df.at[
+                i,
+                "dificuldade"
+            ] = dificuldade
+
+            st.session_state.df.at[
+                i,
+                "favorito"
+            ] = favorito
+
+            st.session_state.editando_id = None
+
+            st.success(
+                "Registro atualizado!"
+            )
+
+            st.rerun()
 
 
 # ============================================================
-# PÁGINA: VISÃO GERAL
+# VISÃO GERAL
 # ============================================================
 
-if pagina == "🏠 Visão Geral":
+def pagina_visao_geral():
+
+    st.title(
+        "🥊 Caderno Tático de Boxe"
+    )
 
     st.markdown(
-        "## 🏠 Visão Geral"
+        "Seu diário pessoal de aprendizado, "
+        "treinos e evolução no Boxe."
     )
+
+    df = st.session_state.df
+
+    # --------------------------------------------------------
+    # Métricas
+    # --------------------------------------------------------
 
     total = len(df)
 
-    favoritos = int(
-        df["favorito"].sum()
+    combos = len(
+        df[df["tipo"] == "Combo"]
     )
 
-    combos = int(
-        (
-            df["tipo"]
-            == "Combo"
-        ).sum()
+    defesas = len(
+        df[df["tipo"] == "Defesa"]
     )
 
-    defesas = int(
-        (
-            df["tipo"]
-            == "Defesa"
-        ).sum()
+    erros = len(
+        df[df["tipo"] == "Erro no Sparring"]
     )
 
-    erros = int(
-        (
-            df["tipo"]
-            == "Erro no Sparring"
-        ).sum()
+    correcoes = len(
+        df[df["tipo"] == "Correção do Professor"]
     )
 
-    correcoes = int(
-        (
-            df["tipo"]
-            == "Correção do Professor"
-        ).sum()
+    treinos = len(
+        df[df["tipo"] == "Treino"]
     )
 
-    treinos = int(
-        (
-            df["tipo"]
-            == "Treino"
-        ).sum()
+    favoritos = len(
+        df[df["favorito"] == True]
     )
 
-    cards = [
-        ("📚", total, "Anotações"),
-        ("⭐", favoritos, "Favoritos"),
-        ("🥊", combos, "Combos"),
-        ("🛡️", defesas, "Defesas"),
-        ("⚠️", erros, "Erros no Sparring"),
-        ("🎯", correcoes, "Correções"),
-        ("🏋️", treinos, "Treinos"),
-    ]
+    c1, c2, c3, c4 = st.columns(4)
 
-    cols = st.columns(4)
+    c1.metric(
+        "📚 Total",
+        total
+    )
 
-    for i, (
-        icone,
-        numero,
-        label
-    ) in enumerate(cards):
+    c2.metric(
+        "🥊 Combos",
+        combos
+    )
 
-        with cols[i % 4]:
+    c3.metric(
+        "🛡️ Defesas",
+        defesas
+    )
 
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div>{icone}</div>
-                    <div class="metric-number">
-                        {numero}
-                    </div>
-                    <div class="metric-label">
-                        {label}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    c4.metric(
+        "⭐ Favoritos",
+        favoritos
+    )
+
+    c5, c6, c7, c8 = st.columns(4)
+
+    c5.metric(
+        "⚠️ Erros",
+        erros
+    )
+
+    c6.metric(
+        "🎯 Correções",
+        correcoes
+    )
+
+    c7.metric(
+        "🏋️ Treinos",
+        treinos
+    )
+
+    c8.metric(
+        "🥊 Registros",
+        total
+    )
 
     st.divider()
 
-    st.markdown(
-        "### 🧠 Últimas anotações"
+    # --------------------------------------------------------
+    # Últimos registros
+    # --------------------------------------------------------
+
+    st.subheader(
+        "🕐 Últimos registros"
     )
 
-    if df.empty:
+    if len(df) == 0:
 
         st.info(
             "Seu caderno ainda está vazio. "
-            "Comece adicionando uma anotação acima."
+            "Comece adicionando sua primeira anotação."
         )
 
     else:
 
-        ultimas = (
-            df.iloc[::-1]
-            .head(5)
-        )
+        ultimos = df.tail(5).iloc[::-1]
 
-        for _, row in ultimas.iterrows():
+        for _, registro in ultimos.iterrows():
 
-            estrela = (
-                "⭐ "
-                if row["favorito"]
+            favorito = (
+                "⭐"
+                if registro["favorito"]
                 else ""
             )
 
             st.markdown(
-                f"**{estrela}"
-                f"{row['titulo']}**  \n"
-                f"{row['tipo']} · "
-                f"{row['categoria']}"
+                f"**{favorito} {registro['titulo']}**  \n"
+                f"{registro['tipo']} • "
+                f"{registro['categoria']}"
             )
 
-            st.caption(
-                str(
-                    row["descricao"]
-                )[:180]
-                +
-                (
-                    "..."
-                    if len(
-                        str(
-                            row["descricao"]
-                        )
-                    ) > 180
-                    else ""
+            if registro["descricao"]:
+
+                st.caption(
+                    registro["descricao"][:180]
+                    + (
+                        "..."
+                        if len(registro["descricao"]) > 180
+                        else ""
+                    )
                 )
-            )
 
             st.divider()
 
 
 # ============================================================
-# PÁGINA: CADERNO
+# CADERNO
 # ============================================================
 
-elif pagina == "📚 Caderno":
+def pagina_caderno():
 
-    mostrar_lista(
-        df,
+    st.title(
         "📚 Caderno"
     )
 
+    if st.session_state.editando_id:
 
-# ============================================================
-# PÁGINAS POR TIPO
-# ============================================================
+        registros = st.session_state.df[
+            st.session_state.df["id"]
+            == st.session_state.editando_id
+        ]
 
-elif pagina == "🥊 Combos":
+        if len(registros) > 0:
+
+            formulario_edicao(
+                registros.iloc[0]
+            )
+
+            st.divider()
+
+    formulario_novo()
+
+    st.divider()
 
     mostrar_lista(
-        df[
-            df["tipo"]
-            == "Combo"
-        ],
+        st.session_state.df,
+        titulo="📚 Todos os registros",
+    )
+
+
+# ============================================================
+# PÁGINAS ESPECÍFICAS
+# ============================================================
+
+def pagina_combos():
+
+    st.title(
         "🥊 Combos"
     )
 
+    formulario_novo(
+        tipo_padrao="Combo"
+    )
 
-elif pagina == "🛡️ Defesas":
+    st.divider()
 
     mostrar_lista(
-        df[
-            df["tipo"]
-            == "Defesa"
-        ],
+        st.session_state.df,
+        tipo_filtro="Combo",
+    )
+
+
+def pagina_defesas():
+
+    st.title(
         "🛡️ Defesas"
     )
 
+    formulario_novo(
+        tipo_padrao="Defesa"
+    )
 
-elif pagina == "⚠️ Erros no Sparring":
+    st.divider()
 
     mostrar_lista(
-        df[
-            df["tipo"]
-            == "Erro no Sparring"
-        ],
+        st.session_state.df,
+        tipo_filtro="Defesa",
+    )
+
+
+def pagina_erros():
+
+    st.title(
         "⚠️ Erros no Sparring"
     )
 
+    formulario_novo(
+        tipo_padrao="Erro no Sparring"
+    )
 
-elif pagina == "🎯 Correções do Professor":
+    st.divider()
 
     mostrar_lista(
-        df[
-            df["tipo"]
-            == "Correção do Professor"
-        ],
+        st.session_state.df,
+        tipo_filtro="Erro no Sparring",
+    )
+
+
+def pagina_correcoes():
+
+    st.title(
         "🎯 Correções do Professor"
     )
 
+    formulario_novo(
+        tipo_padrao="Correção do Professor"
+    )
 
-elif pagina == "🏋️ Treinos":
+    st.divider()
 
     mostrar_lista(
-        df[
-            df["tipo"]
-            == "Treino"
-        ],
+        st.session_state.df,
+        tipo_filtro="Correção do Professor",
+    )
+
+
+def pagina_treinos():
+
+    st.title(
         "🏋️ Treinos"
     )
 
+    formulario_novo(
+        tipo_padrao="Treino"
+    )
 
-elif pagina == "⭐ Favoritos":
+    st.divider()
 
     mostrar_lista(
-        df[
-            df["favorito"] == True
-        ],
+        st.session_state.df,
+        tipo_filtro="Treino",
+    )
+
+
+def pagina_favoritos():
+
+    st.title(
         "⭐ Favoritos"
     )
+
+    df = st.session_state.df[
+        st.session_state.df["favorito"] == True
+    ].copy()
+
+    mostrar_lista(
+        df,
+        titulo="⭐ Meus favoritos",
+    )
+
+
+# ============================================================
+# ROTEAMENTO
+# ============================================================
+
+pagina = st.session_state.pagina
+
+if pagina == "Visão Geral":
+
+    pagina_visao_geral()
+
+elif pagina == "Caderno":
+
+    pagina_caderno()
+
+elif pagina == "Combos":
+
+    pagina_combos()
+
+elif pagina == "Defesas":
+
+    pagina_defesas()
+
+elif pagina == "Erros no Sparring":
+
+    pagina_erros()
+
+elif pagina == "Correções do Professor":
+
+    pagina_correcoes()
+
+elif pagina == "Treinos":
+
+    pagina_treinos()
+
+elif pagina == "Favoritos":
+
+    pagina_favoritos()
+
+else:
+
+    pagina_visao_geral()
