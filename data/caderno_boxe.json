@@ -29,5 +29,18 @@
   "defesas": [],
   "erros_sparring": [],
   "correcoes_professor": [],
-  "treinos": []
+  "treinos": [
+    {
+      "id": "20261002121814757311",
+      "tipo": "Treino",
+      "titulo": "Treino 01/10/2026 - Sparring espaço reduzido",
+      "categoria": "Estratégia & Sparring",
+      "descricao": "1. CONTEXTO & DINÂMICA DO TREINO (01/10/2026):\n\nExercício do Círculo Fechado: O professor delimitou um círculo com espaço de área muito reduzido, forçando o sparring de maior intensidade na média/curta distância.\nDesafio Tático: Sem espaço para fugir em linha reta, o treino exigiu trocas mais francas, gestão de pressão e uso obrigatório de movimentação angular (off-axis / pivôs) para não virar alvo fixo.\n\n2. ANÁLISE DE DESEMPENHO & BLOQUEIO MENTAL:\n\nPontos Fortes (Light Sparring / Treino Solto): Flidez na movimentação, boa leitura de ângulos, variedade de repertório (L-Step, Yakute Move, saídas laterais).\nPonto de Ajuste no Sparring Pegado: Receio de soltar a mão limpa por medo de machucar o parceiro. Resultado: o jab entrava sem peso (pawing jab), fazendo o adversário perder o respeito pela distância e avançar com blitzes (3 a 4 jabs).\n\n3. FEEDBACK TÁTICO DO PAULO (PÓS-TREINO):\n\nA Importância da Mão Firme: A única diferença entre o light sparring e o sparring pegado é o peso/fechamento da mão no ponto de impacto. A mecânica de pernas, tronco e soltura deve ser rigorosamente a mesma.\nO Jab como Ancoragem de Respeito: Se o jab não incomoda ou não estala, o adversário não se fecha. Para fazer o cara respeitar a sua distância e te dar tempo de aplicar a tática, o jab precisa entrar seco e estalar no bloqueio/rosto dele.\nTensão no Impacto: O braço viaja relaxado e solto (preservando o flow e a velocidade do treino leve), mas a mão fecha feito pedra na fração de segundo do contato.\n\n4. DIRETRIZ PRÁTICA PARA OS PRÓXIMOS SPARRINGS:\n\nMantiver o repertório de movimentação (não travar o corpo só porque a intensidade subiu).\nExecutar o Jab de Parada (Stop-Jab) no primeiro movimento de avanço do adversário, fechando o punho no final para estalar a luva.\nEntender que bater seco e limpo não é para nocautear, é para educar a defesa do parceiro e proteger a sua própria integridade.",
+      "fonte": "",
+      "link_video": "",
+      "dificuldade": "Difícil",
+      "favorito": true,
+      "data": "2026-10-02"
+    }
+  ]
 }
