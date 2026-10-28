@@ -12,6 +12,7 @@ import calendar
 import inspect
 import io
 import json
+from pathlib import Path
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta
@@ -923,6 +924,33 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) .stButton 
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) .recente:first-of-type{border-top:0;}
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) .recente .d{color:var(--muted);}
 """
+    # Fundo cinematográfico: mantenha boxing_background.png na mesma pasta do app.py.
+    # Se a imagem não existir, o aplicativo continua funcionando com fundo preto.
+    caminho_fundo = Path(__file__).resolve().parent / "boxing_background.png"
+    if caminho_fundo.exists():
+        try:
+            imagem_b64 = base64.b64encode(caminho_fundo.read_bytes()).decode("ascii")
+            regra_fundo = (
+                ".stApp{"
+                "background-color:#000 !important;"
+                f"background-image:linear-gradient(rgba(0,0,0,.66),rgba(0,0,0,.72)),"
+                f"url('data:image/png;base64,{imagem_b64}') !important;"
+                "background-position:center center !important;"
+                "background-size:cover !important;"
+                "background-attachment:fixed !important;"
+                "background-repeat:no-repeat !important;"
+                "color:var(--text);}"
+                "[data-testid='stAppViewContainer']{background:transparent !important;}"
+                "section[data-testid='stSidebar']{background:rgba(0,0,0,.88) !important;}"
+                "[data-testid='stMain']{background:transparent !important;}"
+            )
+            base = base.replace(
+                ".stApp{ background:var(--bg); color:var(--text); }",
+                regra_fundo
+            )
+        except Exception:
+            pass
+
     return "<style>" + base + por_tipo + "</style>"
 
 
