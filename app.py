@@ -8,6 +8,7 @@ e opcionalmente GITHUB_FILE e GITHUB_BRANCH).
 """
 
 import base64
+import calendar
 import inspect
 import io
 import json
@@ -527,6 +528,8 @@ def iniciar_estado():
         st.session_state.autosave = estado in ("ok", "novo")
 
     st.session_state.setdefault("pagina", "Visão geral")
+    st.session_state.setdefault("mes_calendario", hoje().replace(day=1))
+    st.session_state.setdefault("data_treino_selecionada", "")
     st.session_state.setdefault("editando_id", None)
     st.session_state.setdefault("excluindo_id", None)
     st.session_state.setdefault("avisos", [])
@@ -633,8 +636,8 @@ def montar_css():
 @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap');
 
 :root{
-  --bg:#0F1A26; --surface:#162434; --raised:#1D3046; --line:#2A4057;
-  --text:#E9EEF3; --muted:#98A9BB; --accent:#DB3A3F; --gold:#E8C547; --ok:#7CC47C;
+  --bg:#000000; --surface:#080808; --raised:#141414; --line:#292929;
+  --text:#F5F5F5; --muted:#A0A0A0; --accent:#E1262F; --gold:#E8C547; --ok:#7CC47C;
 }
 
 html, body, .stApp, p, li, label, input, textarea, button, a,
@@ -763,7 +766,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 
 .pill{
   display:inline-block; padding:.1rem .6rem; border-radius:999px;
-  font-size:.85rem; font-weight:600; color:#0F1A26; background:var(--c, var(--muted));
+  font-size:.85rem; font-weight:600; color:#000000; background:var(--c, var(--muted));
 }
 .pill.ok{ background:transparent; color:var(--ok); border:1px solid var(--ok); }
 
@@ -797,7 +800,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 .week .col{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; min-width:0; }
 .week .n{ color:var(--muted); font-size:.85rem; height:1rem; font-variant-numeric:tabular-nums; }
 .week .wrap{ flex:1; width:100%; display:flex; align-items:flex-end; }
-.week .wrap b{ display:block; width:100%; min-height:3px; border-radius:3px 3px 0 0; background:#4A6580; }
+.week .wrap b{ display:block; width:100%; min-height:3px; border-radius:3px 3px 0 0; background:#444444; }
 .week .col.atual .wrap b{ background:var(--accent); }
 .week .d{ color:var(--muted); font-size:.8rem; white-space:nowrap; }
 
@@ -808,6 +811,19 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 
 .vazio{ border:1px dashed var(--line); border-radius:8px; padding:1.6rem 1.4rem; color:var(--muted); line-height:1.5; }
 .vazio b{ color:var(--text); font-weight:600; }
+
+/* ---------- Calendário de treinos ---------- */
+.cal-shell{background:#050505;border:1px solid #292929;border-radius:10px;padding:1rem;}
+.cal-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:1rem;}
+.cal-month{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:1.6rem;font-weight:700;text-transform:capitalize;}
+.cal-legend{display:flex;gap:1rem;flex-wrap:wrap;color:var(--muted);font-size:.88rem;margin:.6rem 0 .2rem;}
+.cal-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#E1262F;margin-right:.35rem;}
+.cal-dot.today{background:#F5F5F5;}
+.cal-note{color:var(--muted);font-size:.9rem;margin:.5rem 0 0;}
+div[data-testid="stHorizontalBlock"]:has(.calendar-marker){gap:.35rem;}
+.calendar-marker{display:none;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker){background:#090909;border:1px solid #292929;border-radius:8px;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) .stButton button{min-height:2.7rem;padding:.25rem;}
 """
     return "<style>" + base + por_tipo + "</style>"
 
@@ -1137,8 +1153,12 @@ def validar_campos(campos):
     return ""
 
 
-def formulario_novo(chave, tipo_padrao=None, expandido=False):
-    base = {**VALORES_PADRAO, "tipo": tipo_padrao or "Dica", "data": ""}
+def formulario_novo(chave, tipo_padrao=None, expandido=False, data_padrao=None):
+    base = {
+        **VALORES_PADRAO,
+        "tipo": tipo_padrao or "Dica",
+        "data": data_padrao or "",
+    }
 
     with st.expander("Novo registro", expanded=expandido):
         with st.form(f"form_novo_{chave}", clear_on_submit=True):
@@ -1477,7 +1497,7 @@ def pagina_visao_geral():
 
     with direita:
         bloco_por_tipo(df)
-        bloco_por_semana(df)
+        bloco_calendario_treinos(df)
         bloco_por_categoria(df)
 
 
@@ -1568,36 +1588,81 @@ def bloco_por_tipo(df):
     st.markdown(linhas, unsafe_allow_html=True)
 
 
-def bloco_por_semana(df):
-    secao("Ritmo de registros", "Últimas 8 semanas")
+def bloco_calendario_treinos(df):
+    """Calendário mensal: dias com treino são destacados e abrem os registros daquele dia."""
+    secao("Calendário de treinos", "Toque em um dia para abrir ou registrar o treino daquela data.")
 
-    hoje_ = hoje()
-    inicio_atual = hoje_ - timedelta(days=hoje_.weekday())
-    contagem = [0] * 8
-
-    for iso in df["data"]:
-        if not iso:
-            continue
-        dia = para_date(iso)
-        inicio = dia - timedelta(days=dia.weekday())
-        distancia = (inicio_atual - inicio).days // 7
-        if 0 <= distancia < 8:
-            contagem[7 - distancia] += 1
-
-    maximo = max(max(contagem), 1)
-    colunas = ""
-
-    for posicao, n in enumerate(contagem):
-        inicio = inicio_atual - timedelta(weeks=7 - posicao)
-        altura = round(100 * n / maximo)
-        atual = " atual" if posicao == 7 else ""
-        colunas += (
-            f'<div class="col{atual}"><span class="n">{n or ""}</span>'
-            f'<div class="wrap"><b style="height:{altura}%"></b></div>'
-            f'<span class="d">{inicio:%d/%m}</span></div>'
+    mes = st.session_state.mes_calendario
+    c_prev, c_mes, c_next = st.columns([1, 4, 1])
+    with c_prev:
+        if st.button("‹", key="cal_mes_anterior", help="Mês anterior", **LARGURA_BTN):
+            anterior = mes.replace(day=1) - timedelta(days=1)
+            st.session_state.mes_calendario = anterior.replace(day=1)
+            st.rerun()
+    with c_mes:
+        st.markdown(
+            f'<div class="cal-head"><div class="cal-month">{MESES[mes.month - 1]} {mes.year}</div></div>',
+            unsafe_allow_html=True,
         )
+    with c_next:
+        if st.button("›", key="cal_proximo_mes", help="Próximo mês", **LARGURA_BTN):
+            proximo = mes.replace(day=28) + timedelta(days=4)
+            st.session_state.mes_calendario = proximo.replace(day=1)
+            st.rerun()
 
-    st.markdown(f'<div class="week">{colunas}</div>', unsafe_allow_html=True)
+    treinos = df[(df["tipo"] == "Treino") & (df["data"] != "")]
+    datas_com_treino = set(treinos["data"].tolist())
+    dias = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
+    cols = st.columns(7, gap="small")
+    for col, dia_semana in zip(cols, dias):
+        with col:
+            st.markdown(
+                f'<div style="text-align:center;color:#999;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
+                unsafe_allow_html=True,
+            )
+
+    primeiro_dia_semana, total_dias = calendar.monthrange(mes.year, mes.month)
+    semanas = (primeiro_dia_semana + total_dias + 6) // 7
+    dia_atual = hoje()
+    dia_numero = 1
+
+    for semana in range(semanas):
+        cols = st.columns(7, gap="small")
+        for coluna in range(7):
+            indice_dia = semana * 7 + coluna
+            with cols[coluna]:
+                if indice_dia < primeiro_dia_semana or dia_numero > total_dias:
+                    st.markdown('<div style="height:2.7rem"></div>', unsafe_allow_html=True)
+                    continue
+
+                data_dia = date(mes.year, mes.month, dia_numero)
+                iso = data_dia.isoformat()
+                tem_treino = iso in datas_com_treino
+                eh_hoje = data_dia == dia_atual
+                rotulo = f'🥊 {dia_numero}' if tem_treino else str(dia_numero)
+                if eh_hoje:
+                    rotulo = f'• {rotulo}'
+                ajuda = "Abrir treino registrado" if tem_treino else "Registrar treino neste dia"
+                if st.button(
+                    rotulo,
+                    key=f"cal_dia_{iso}",
+                    help=f"{data_dia:%d/%m/%Y} — {ajuda}",
+                    type="primary" if tem_treino else "secondary",
+                    **LARGURA_BTN,
+                ):
+                    st.session_state.data_treino_selecionada = iso
+                    st.session_state.pagina = "Treinos"
+                    st.session_state.editando_id = None
+                    st.session_state.excluindo_id = None
+                    st.rerun()
+                dia_numero += 1
+
+    st.markdown(
+        '<div class="cal-legend"><span><i class="cal-dot"></i>Dia com treino (🥊)</span>'
+        '<span><i class="cal-dot today"></i>Hoje (•)</span></div>'
+        '<div class="cal-note">Os dias marcados com 🥊 já possuem pelo menos um registro do tipo Treino.</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def bloco_por_categoria(df):
@@ -1633,9 +1698,24 @@ def pagina_caderno():
 def pagina_tipo(nome, tipo):
     df = st.session_state.df
     df_tipo = df[df["tipo"] == tipo]
+    data_selecionada = st.session_state.get("data_treino_selecionada", "") if tipo == "Treino" else ""
 
-    cabecalho_pagina(nome, subtitulo_dados(df_tipo))
-    formulario_novo(f"tipo_{tipo}", tipo_padrao=tipo, expandido=len(df_tipo) == 0)
+    if tipo == "Treino" and data_selecionada:
+        df_tipo = df_tipo[df_tipo["data"] == data_selecionada]
+        data_legivel = formatar_data(data_selecionada)
+        cabecalho_pagina(f"Treino de {data_legivel}", "Registros vinculados ao dia selecionado no calendário.")
+        if st.button("← Voltar para todos os treinos", key="voltar_todos_treinos", **LARGURA_BTN):
+            st.session_state.data_treino_selecionada = ""
+            st.rerun()
+        formulario_novo(
+            f"tipo_{tipo}_{data_selecionada}",
+            tipo_padrao=tipo,
+            expandido=len(df_tipo) == 0,
+            data_padrao=data_selecionada,
+        )
+    else:
+        cabecalho_pagina(nome, subtitulo_dados(df_tipo))
+        formulario_novo(f"tipo_{tipo}", tipo_padrao=tipo, expandido=len(df_tipo) == 0)
 
     mensagens_vazias = {
         "Combo": "Anote as sequências que você quer automatizar, como 'jab, direto, gancho de esquerda'.",
@@ -1646,10 +1726,16 @@ def pagina_tipo(nome, tipo):
         "Dica": "Guarde dicas de técnica, estratégia e mentalidade.",
     }
 
+    chave_lista = f"tipo_{tipo}_{data_selecionada}" if tipo == "Treino" and data_selecionada else f"tipo_{tipo}"
+    texto_vazio = (
+        ("Nenhum treino registrado neste dia.", "Use o formulário acima para adicionar o treino desta data.")
+        if tipo == "Treino" and data_selecionada
+        else (f"Nenhum registro em {nome.lower()} ainda.", mensagens_vazias.get(tipo, ""))
+    )
     lista_de_registros(
         df_tipo,
-        f"tipo_{tipo}",
-        vazio=(f"Nenhum registro em {nome.lower()} ainda.", mensagens_vazias.get(tipo, "")),
+        chave_lista,
+        vazio=texto_vazio,
     )
 
 
