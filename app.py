@@ -632,7 +632,7 @@ def montar_css():
 
 :root{
   --bg:#000000; --surface:#080808; --raised:#141414; --line:#292929;
-  --text:#F5F5F5; --muted:#A0A0A0; --accent:#E1262F; --gold:#E8C547; --ok:#7CC47C;
+  --text:#F5F5F5; --muted:#FF555D; --accent:#E1262F; --gold:#E8C547; --ok:#7CC47C;
 }
 
 html, body, .stApp, p, li, label, input, textarea, button, a,
@@ -773,8 +773,8 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm){
   background:var(--surface); border:1px solid var(--line); border-radius:8px;
 }
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
-  background:var(--surface); border:1px solid var(--line);
-  border-top:4px solid var(--accent); border-radius:8px; padding:.35rem .35rem .15rem;
+  background:var(--surface); border:1px solid var(--line); border-top:4px solid var(--accent);
+  border-radius:8px; padding:.35rem .35rem .15rem;
 }
 .cm, .hm{ display:none; }
 .card-top{ display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .75rem; margin-bottom:.35rem; }
@@ -831,7 +831,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 .week .col.atual .wrap b{ background:var(--accent); }
 .week .d{ color:var(--muted); font-size:.8rem; white-space:nowrap; }
 
-.recente{ display:flex; flex-wrap:wrap; align-items:center; gap:.3rem .75rem; padding:.55rem 0; border-top:1px solid var(--line); }
+.recente{ display:flex; flex-wrap:wrap; align-items:center; gap:.3rem .75rem; padding:.65rem .2rem; border-top:1px solid rgba(225,38,47,.35); }
 .recente:first-child{ border-top:0; }
 .recente .t{ font-weight:500; flex:1 1 220px; min-width:0; }
 .recente .d{ color:var(--muted); font-size:.92rem; }
@@ -840,7 +840,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 .vazio b{ color:var(--text); font-weight:600; }
 
 /* ---------- Calendário de treinos ---------- */
-.cal-shell{background:#050505;border:1px solid #292929;border-radius:10px;padding:1rem;}
+.cal-shell{background:#050505;border:1px solid rgba(225,38,47,.7);border-radius:10px;padding:1rem;animation:neonBoxe 4.5s ease-in-out infinite;}
 .cal-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:1rem;}
 .cal-month{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:1.6rem;font-weight:700;text-transform:capitalize;}
 .cal-legend{display:flex;gap:1rem;flex-wrap:wrap;color:var(--muted);font-size:.88rem;margin:.6rem 0 .2rem;}
@@ -851,11 +851,52 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 .kpi-icon{font-size:1.1rem;color:#FF303A;margin-bottom:.25rem;}
 .kpi-value{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:2rem;font-weight:700;line-height:1.05;color:#fff;}
 .kpi-label{font-size:.88rem;color:var(--muted);margin-top:.25rem;}
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker){background:#050505;border:1px solid rgba(225,38,47,.7)!important;border-radius:10px;box-shadow:0 0 6px rgba(225,38,47,.12);padding:.35rem;}
+/* Força a borda neon nos containers do Streamlit, inclusive no elemento interno
+   que algumas versões usam para desenhar a borda padrão cinza. */
+@keyframes neonFrame {
+  0%, 100% {
+    border-color: rgba(225,38,47,.72) !important;
+    box-shadow: 0 0 4px rgba(225,38,47,.18), inset 0 0 3px rgba(225,38,47,.04) !important;
+  }
+  50% {
+    border-color: rgba(255,48,58,1) !important;
+    box-shadow: 0 0 11px rgba(225,38,47,.42), inset 0 0 5px rgba(225,38,47,.10) !important;
+  }
+}
+/* Bordas neon animadas: aplica no wrapper e no elemento interno que o Streamlit
+   pode usar para desenhar a borda padrão cinza. */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
+  background:#050505 !important;
+  border:1px solid rgba(225,38,47,.82) !important;
+  border-radius:10px !important;
+  box-shadow:0 0 6px rgba(225,38,47,.20) !important;
+  animation:neonFrame 3.8s ease-in-out infinite !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
+  padding:.4rem;
+}
+/* Fallback para versões do Streamlit que colocam a borda no segundo nível. */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div > div {
+  border-color:rgba(225,38,47,.82) !important;
+  border-radius:10px !important;
+  box-shadow:0 0 6px rgba(225,38,47,.18) !important;
+  animation:neonFrame 3.8s ease-in-out infinite !important;
+  background:transparent !important;
+}
 div[data-testid="stHorizontalBlock"]:has(.calendar-marker){gap:.35rem;}
-.calendar-marker{display:none;}
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker){background:#050505;border:1px solid rgba(225,38,47,.7)!important;border-radius:10px;box-shadow:0 0 6px rgba(225,38,47,.12);padding:.35rem;}
+.calendar-marker,.recentes-marker{display:none;}
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) .stButton button{min-height:2.7rem;padding:.25rem;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) .recente:first-of-type{border-top:0;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) .recente .d{color:var(--muted);}
 """
     return "<style>" + base + por_tipo + "</style>"
 
@@ -1392,7 +1433,9 @@ def bloco_recentes(df):
             f'<span class="d">{formatar_data(r["data"])}</span></div>'
         )
 
-    st.markdown(linhas, unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<span class="recentes-marker"></span>', unsafe_allow_html=True)
+        st.markdown(linhas, unsafe_allow_html=True)
 
 
 def bloco_por_tipo(df):
@@ -1445,7 +1488,7 @@ def bloco_calendario_treinos(df):
         for col, dia_semana in zip(cols, dias):
             with col:
                 st.markdown(
-                    f'<div style="text-align:center;color:#999;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
+                    f'<div style="text-align:center;color:#FF555D;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
                     unsafe_allow_html=True,
                 )
 
