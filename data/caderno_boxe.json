@@ -9,6 +9,7 @@
       "fonte": "Yakute",
       "link_video": "",
       "dificuldade": "Difícil",
+      "status": "Praticando",
       "favorito": true,
       "data": "2026-10-01"
     },
@@ -21,6 +22,7 @@
       "fonte": "José Lemos",
       "link_video": "",
       "dificuldade": "Médio",
+      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-01"
     }
@@ -39,6 +41,7 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Difícil",
+      "status": "Praticando",
       "favorito": true,
       "data": "2026-10-02"
     },
@@ -51,6 +54,7 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Médio",
+      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-07"
     },
@@ -63,6 +67,7 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Médio",
+      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-27"
     },
@@ -75,6 +80,7 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Fácil",
+      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-27"
     },
@@ -87,6 +93,7 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Difícil",
+      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-27"
     },
@@ -99,6 +106,7 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Médio",
+      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-27"
     },
@@ -111,7 +119,8 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Difícil",
-      "favorito": false,
+      "status": "Praticando",
+      "favorito": true,
       "data": "2026-10-27"
     },
     {
@@ -123,6 +132,7 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Fácil",
+      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-28"
     }
