@@ -9,7 +9,6 @@
       "fonte": "Yakute",
       "link_video": "",
       "dificuldade": "Difícil",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-01"
     },
@@ -22,7 +21,6 @@
       "fonte": "José Lemos",
       "link_video": "",
       "dificuldade": "Médio",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-01"
     }
@@ -30,7 +28,20 @@
   "combos": [],
   "defesas": [],
   "erros_sparring": [],
-  "correcoes_professor": [],
+  "correcoes_professor": [
+    {
+      "id": "0990c0756a734dad",
+      "tipo": "Correção do Professor",
+      "titulo": "Cruzado muito fechado.",
+      "categoria": "Técnica",
+      "descricao": "- Meu cruzado tanto de esquerda quanto de direita estava saindo muito curto. Entendi a técnica de soltar o braço com o cotovelo levemente flexionado. O que gira é o tronco,o braço só vai junto.",
+      "fonte": "",
+      "link_video": "",
+      "dificuldade": "Médio",
+      "favorito": false,
+      "data": "2026-10-28"
+    }
+  ],
   "treinos": [
     {
       "id": "20261002121814757311",
@@ -41,7 +52,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Difícil",
-      "status": "Praticando",
       "favorito": true,
       "data": "2026-10-01"
     },
@@ -54,7 +64,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Médio",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-06"
     },
@@ -67,7 +76,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Médio",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-08"
     },
@@ -80,7 +88,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Fácil",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-13"
     },
@@ -93,7 +100,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Difícil",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-18"
     },
@@ -106,7 +112,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Médio",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-20"
     },
@@ -119,7 +124,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Difícil",
-      "status": "Praticando",
       "favorito": true,
       "data": "2026-10-22"
     },
@@ -132,7 +136,6 @@
       "fonte": "",
       "link_video": "",
       "dificuldade": "Médio",
-      "status": "Praticando",
       "favorito": false,
       "data": "2026-10-27"
     }
