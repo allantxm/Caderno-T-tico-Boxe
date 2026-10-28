@@ -58,7 +58,6 @@ COLUNAS = [
     "fonte",
     "link_video",
     "dificuldade",
-    "status",
     "favorito",
     "data",
 ]
@@ -86,8 +85,6 @@ CATEGORIAS = [
 ]
 
 DIFICULDADES = ["Fácil", "Médio", "Difícil"]
-STATUS = ["Praticando", "Dominado"]
-TIPOS_SEM_STATUS = {"Treino"}  # treino não "se domina"
 TIPOS_REVISAO = ["Erro no Sparring", "Correção do Professor"]
 
 # (rótulo no menu, tipo filtrado ou None)
@@ -112,7 +109,6 @@ VALORES_PADRAO = {
     "fonte": "",
     "link_video": "",
     "dificuldade": "Médio",
-    "status": "Praticando",
     "favorito": False,
     "data": "",
 }
@@ -234,7 +230,7 @@ def converter_favorito(valor):
 def preparar_dataframe(df):
     """
     Garante colunas, tipos e valores válidos. Aceita dados antigos
-    (sem 'status', sem 'descricao', etc.) e planilhas importadas.
+    (sem 'descricao', etc.) e dados antigos.
     """
     if df is None:
         return criar_dataframe_vazio()
@@ -271,7 +267,6 @@ def preparar_dataframe(df):
 
     df["tipo"] = df["tipo"].apply(lambda v: forcar(v, TIPOS, "Dica"))
     df["dificuldade"] = df["dificuldade"].apply(lambda v: forcar(v, DIFICULDADES, "Médio"))
-    df["status"] = df["status"].apply(lambda v: forcar(v, STATUS, "Praticando"))
     df["categoria"] = df["categoria"].apply(lambda v: v or "Outro")
     df["data"] = df["data"].apply(normalizar_data)
     df["favorito"] = df["favorito"].apply(converter_favorito).astype(bool)
@@ -493,7 +488,7 @@ def gerar_excel(df):
 
     larguras = {
         "id": 18, "tipo": 22, "titulo": 36, "categoria": 26, "descricao": 70,
-        "fonte": 26, "link_video": 40, "dificuldade": 13, "status": 13,
+        "fonte": 26, "link_video": 40, "dificuldade": 13,
         "favorito": 10, "data": 12,
     }
     for posicao, coluna in enumerate(COLUNAS, start=1):
@@ -741,6 +736,38 @@ section[data-testid="stSidebar"] .stButton > button p{ text-align:left; }
 [data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"]{ border-radius:6px; }
 [data-testid="stCaptionContainer"]{ color:var(--muted); }
 
+/* Borda neon vermelha sutil e animada nos campos e quadros */
+@keyframes neonBoxe {
+  0%, 100% { border-color:rgba(225,38,47,.48); box-shadow:0 0 3px rgba(225,38,47,.08); }
+  50% { border-color:rgba(255,45,55,.95); box-shadow:0 0 7px rgba(225,38,47,.22), inset 0 0 2px rgba(225,38,47,.08); }
+}
+[data-testid="stTextInput"] [data-baseweb="input"],
+[data-testid="stTextArea"] [data-baseweb="textarea"],
+[data-testid="stNumberInput"] [data-baseweb="input"],
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stDateInput"] [data-baseweb="input"] {
+  border:1px solid rgba(225,38,47,.55) !important;
+  animation:neonBoxe 3.8s ease-in-out infinite;
+  transition:box-shadow .2s ease, border-color .2s ease;
+}
+[data-testid="stTextInput"] [data-baseweb="input"]:focus-within,
+[data-testid="stTextArea"] [data-baseweb="textarea"]:focus-within,
+[data-testid="stNumberInput"] [data-baseweb="input"]:focus-within,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within,
+[data-testid="stDateInput"] [data-baseweb="input"]:focus-within {
+  border-color:#FF303A !important;
+  box-shadow:0 0 9px rgba(225,38,47,.32) !important;
+}
+[data-testid="stForm"], [data-testid="stExpander"] details,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm),
+.cal-shell, div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) {
+  animation:neonBoxe 4.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; }
+}
+
 /* ---------- Cartões de registro ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm){
   background:var(--surface); border:1px solid var(--line); border-radius:8px;
@@ -954,8 +981,8 @@ def barra_lateral():
                 help="Cada alteração gera um commit no repositório do GitHub.",
             )
 
-        with st.expander("Importar e exportar"):
-            importar_e_exportar()
+        with st.expander("Exportar dados"):
+            exportar_dados()
 
 
 def recarregar_da_nuvem():
@@ -977,45 +1004,8 @@ def recarregar_da_nuvem():
     st.rerun()
 
 
-def importar_e_exportar():
-    st.caption("Importe uma planilha (.xlsx) ou um backup (.json).")
-
-    arquivo = st.file_uploader(
-        "Arquivo",
-        type=["xlsx", "json"],
-        label_visibility="collapsed",
-        key=f"uploader_{st.session_state.uploader_versao}",
-    )
-
-    modo = st.radio(
-        "Ao importar",
-        ["Adicionar aos existentes", "Substituir tudo"],
-        key="modo_importacao",
-    )
-
-    if st.button("Importar", key="btn_importar", disabled=arquivo is None, **LARGURA_BTN):
-        try:
-            df_importado = ler_arquivo_importado(arquivo)
-            quantidade = len(df_importado)
-
-            if modo == "Substituir tudo":
-                df_final = df_importado
-            else:
-                df_final = pd.concat(
-                    [st.session_state.df, df_importado], ignore_index=True
-                ).drop_duplicates(subset="id", keep="first")
-
-            confirmar_mudanca(df_final, f"{plural(quantidade, 'registro importado', 'registros importados')}.", "📥")
-            st.session_state.uploader_versao += 1
-            st.rerun()
-
-        except ValueError as erro:
-            st.error(str(erro))
-        except Exception as erro:
-            st.error(f"Não foi possível ler o arquivo: {erro}")
-
-    st.divider()
-
+def exportar_dados():
+    st.caption("Exporte seus registros para guardar uma cópia de segurança.")
     try:
         st.download_button(
             "Baixar planilha (.xlsx)",
@@ -1035,29 +1025,6 @@ def importar_e_exportar():
         )
     except Exception as erro:
         st.error(f"Erro ao gerar os arquivos: {erro}")
-
-
-def ler_arquivo_importado(arquivo):
-    nome = arquivo.name.lower()
-
-    if nome.endswith(".json"):
-        dados = json.loads(arquivo.getvalue().decode("utf-8"))
-        df = json_para_dataframe(dados)
-    else:
-        df = pd.read_excel(arquivo)
-        df.columns = [str(c).strip().lower() for c in df.columns]
-
-        if "titulo" not in df.columns:
-            raise ValueError("A planilha precisa ter uma coluna chamada 'titulo'.")
-
-        df = preparar_dataframe(df)
-
-    df = df[df["titulo"] != ""]
-
-    if len(df) == 0:
-        raise ValueError("Nenhum registro com título foi encontrado no arquivo.")
-
-    return df.reset_index(drop=True)
 
 
 # ============================================================
@@ -1101,12 +1068,6 @@ def campos_do_registro(prefixo, base):
             format="DD/MM/YYYY",
             key=f"{prefixo}_data",
         )
-        status = st.selectbox(
-            "Status",
-            STATUS,
-            index=indice_de(STATUS, base["status"]),
-            key=f"{prefixo}_status",
-        )
         fonte = st.text_input(
             "Fonte",
             value=base["fonte"],
@@ -1139,7 +1100,6 @@ def campos_do_registro(prefixo, base):
         "fonte": fonte.strip(),
         "link_video": normalizar_link(link_video),
         "dificuldade": dificuldade,
-        "status": status,
         "favorito": favorito,
         "data": data_registro.strftime("%Y-%m-%d"),
     }
@@ -1215,12 +1175,7 @@ def cartao_registro(registro, chave):
             formulario_edicao(registro, chave)
             return
 
-        # Topo: tipo, categoria, dificuldade, status, data
-        status_html = (
-            '<span class="pill ok">Dominado</span>'
-            if registro["status"] == "Dominado" and tipo not in TIPOS_SEM_STATUS
-            else ""
-        )
+        # Topo: tipo, categoria, dificuldade e data
         estrela = '<span class="fav">★</span>' if registro["favorito"] else ""
         data_html = (
             f'<span class="card-date">{formatar_data(registro["data"])}</span>'
@@ -1230,7 +1185,7 @@ def cartao_registro(registro, chave):
 
         st.markdown(
             f'<span class="cm {info["css"]}"></span>'
-            f'<div class="card-top">{html_pilula(tipo)}{status_html}'
+            f'<div class="card-top">{html_pilula(tipo)}'
             f'<span class="card-meta">{escape(registro["categoria"])}</span>'
             f'{html_dificuldade(registro["dificuldade"])}{data_html}</div>'
             f'<div class="card-title">{estrela}{escape(registro["titulo"])}</div>',
@@ -1264,11 +1219,9 @@ def cartao_registro(registro, chave):
 
 def acoes_do_cartao(registro, chave):
     id_registro = registro["id"]
-    tem_status = registro["tipo"] not in TIPOS_SEM_STATUS
     tem_video = bool(registro["link_video"])
-    dominado = registro["status"] == "Dominado"
 
-    quantidade = 3 + int(tem_status) + int(tem_video)
+    quantidade = 3 + int(tem_video)
     colunas = st.columns([1] * quantidade + [max(1, 6 - quantidade)])
     posicao = 0
 
@@ -1297,23 +1250,6 @@ def acoes_do_cartao(registro, chave):
             st.rerun()
     posicao += 1
 
-    if tem_status:
-        with colunas[posicao]:
-            if st.button(
-                "Rever" if dominado else "Dominei",
-                key=f"{chave}_status_{id_registro}",
-                help="Voltar para 'Praticando'" if dominado else "Marcar como dominado",
-                **LARGURA_BTN,
-            ):
-                atualizar_registro(
-                    id_registro,
-                    {"status": "Praticando" if dominado else "Dominado"},
-                    "Voltou para a lista de prática." if dominado else "Marcado como dominado.",
-                    "🥊",
-                )
-                st.rerun()
-        posicao += 1
-
     with colunas[posicao]:
         if st.button("Editar", key=f"{chave}_edit_{id_registro}", **LARGURA_BTN):
             st.session_state.editando_id = id_registro
@@ -1326,136 +1262,6 @@ def acoes_do_cartao(registro, chave):
             st.session_state.excluindo_id = id_registro
             st.session_state.editando_id = None
             st.rerun()
-
-
-# ============================================================
-# LISTAGEM COM FILTROS
-# ============================================================
-
-ORDENACOES = [
-    "Mais recentes",
-    "Mais antigos",
-    "Título (A a Z)",
-    "Mais difíceis primeiro",
-    "Favoritos primeiro",
-]
-
-
-def aplicar_filtros(df, busca, categoria, dificuldade, status, so_favoritos, tipo, ordem):
-    resultado = df.assign(_pos=df.index)
-
-    if tipo != "Todos":
-        resultado = resultado[resultado["tipo"] == tipo]
-    if categoria != "Todas":
-        resultado = resultado[resultado["categoria"] == categoria]
-    if dificuldade != "Todas":
-        resultado = resultado[resultado["dificuldade"] == dificuldade]
-    if status != "Todos":
-        resultado = resultado[resultado["status"] == status]
-    if so_favoritos:
-        resultado = resultado[resultado["favorito"]]
-
-    termos = normalizar_texto(busca).split()
-    if termos and len(resultado):
-        palheiro = (
-            resultado["titulo"] + " " + resultado["descricao"] + " "
-            + resultado["categoria"] + " " + resultado["fonte"] + " "
-            + resultado["tipo"]
-        ).map(normalizar_texto)
-        mascara = pd.Series(True, index=resultado.index)
-        for termo in termos:
-            mascara &= palheiro.str.contains(termo, regex=False)
-        resultado = resultado[mascara]
-
-    peso = {"Fácil": 1, "Médio": 2, "Difícil": 3}
-
-    if ordem == "Mais antigos":
-        resultado = resultado.sort_values(["data", "_pos"])
-    elif ordem == "Título (A a Z)":
-        resultado = resultado.assign(_t=resultado["titulo"].map(normalizar_texto)).sort_values("_t")
-    elif ordem == "Mais difíceis primeiro":
-        resultado = resultado.assign(_d=resultado["dificuldade"].map(peso)).sort_values(
-            ["_d", "_pos"], ascending=[False, False]
-        )
-    elif ordem == "Favoritos primeiro":
-        resultado = resultado.sort_values(["favorito", "_pos"], ascending=[False, False])
-    else:
-        resultado = resultado.sort_values(["data", "_pos"], ascending=[False, False])
-
-    return resultado
-
-
-def lista_de_registros(df_base, chave, filtrar_tipo=False, vazio=None):
-    """Mostra filtros e cartões para o DataFrame recebido."""
-    if len(df_base) == 0:
-        titulo, texto = vazio or ("Nada por aqui ainda.", "Adicione um registro no botão acima.")
-        estado_vazio(titulo, texto)
-        return
-
-    busca = st.text_input(
-        "Buscar",
-        placeholder="Buscar por título, descrição, fonte ou categoria",
-        label_visibility="collapsed",
-        key=f"busca_{chave}",
-    )
-
-    colunas = st.columns([2, 2, 2, 2, 2] if filtrar_tipo else [2, 2, 2, 2])
-    posicao = iter(colunas)
-
-    tipo = "Todos"
-    if filtrar_tipo:
-        with next(posicao):
-            tipo = st.selectbox("Tipo", ["Todos"] + TIPOS, key=f"tipo_{chave}")
-
-    with next(posicao):
-        categorias = ["Todas"] + sorted(c for c in df_base["categoria"].unique() if c)
-        categoria = st.selectbox("Categoria", categorias, key=f"cat_{chave}")
-    with next(posicao):
-        dificuldade = st.selectbox("Dificuldade", ["Todas"] + DIFICULDADES, key=f"dif_{chave}")
-    with next(posicao):
-        status = st.selectbox("Status", ["Todos"] + STATUS, key=f"sta_{chave}")
-    with next(posicao):
-        ordem = st.selectbox("Ordenar por", ORDENACOES, key=f"ord_{chave}")
-
-    so_favoritos = st.toggle("Só favoritos", key=f"fav_{chave}")
-
-    resultado = aplicar_filtros(
-        df_base, busca, categoria, dificuldade, status, so_favoritos, tipo, ordem
-    )
-
-    st.caption(plural(len(resultado), "registro", "registros"))
-
-    if len(resultado) == 0:
-        estado_vazio(
-            "Nenhum registro com esses filtros.",
-            "Limpe a busca ou escolha outras opções.",
-        )
-        return
-
-    chave_limite = f"limite_{chave}"
-    limite = st.session_state.get(chave_limite, ITENS_POR_PAGINA)
-
-    for _, registro in resultado.head(limite).iterrows():
-        cartao_registro(registro, chave)
-
-    if len(resultado) > limite:
-        restantes = len(resultado) - limite
-        if st.button(
-            f"Mostrar mais ({restantes})", key=f"mais_{chave}", **LARGURA_BTN
-        ):
-            st.session_state[chave_limite] = limite + ITENS_POR_PAGINA
-            st.rerun()
-
-
-# ============================================================
-# PÁGINAS
-# ============================================================
-
-def subtitulo_dados(df):
-    return (
-        f"{plural(len(df), 'registro', 'registros')}, "
-        f"{plural(int(df['favorito'].sum()), 'favorito', 'favoritos')}"
-    )
 
 
 def pagina_visao_geral():
@@ -1477,14 +1283,10 @@ def pagina_visao_geral():
         formulario_novo("visao", expandido=True)
         return
 
-    dominados = int(
-        ((df["status"] == "Dominado") & (~df["tipo"].isin(TIPOS_SEM_STATUS))).sum()
-    )
     cabecalho_pagina(
         "Caderno tático de boxe",
         f"{data_extenso}. {plural(len(df), 'registro', 'registros')}, "
-        f"{plural(int(df['favorito'].sum()), 'favorito', 'favoritos')} e "
-        f"{plural(dominados, 'item dominado', 'itens dominados')}.",
+        f"{plural(int(df['favorito'].sum()), 'favorito', 'favoritos')}. ",
     )
 
     formulario_novo("visao")
@@ -1502,14 +1304,14 @@ def pagina_visao_geral():
 
 
 def bloco_antes_do_sparring(df):
-    pendentes = df[df["tipo"].isin(TIPOS_REVISAO) & (df["status"] != "Dominado")]
+    pendentes = df[df["tipo"].isin(TIPOS_REVISAO)]
     pendentes = pendentes.assign(_pos=pendentes.index).sort_values(
         ["data", "_pos"], ascending=[False, False]
     )
 
     secao(
         "Antes do sparring",
-        "Erros e correções que você ainda não domina, do mais recente ao mais antigo.",
+        "Erros e correções para revisar antes do próximo sparring, do mais recente ao mais antigo.",
     )
 
     with st.container(border=True):
@@ -1525,19 +1327,12 @@ def bloco_antes_do_sparring(df):
             return
 
         for numero, (_, item) in enumerate(pendentes.head(4).iterrows()):
-            c1, c2 = st.columns([5, 1], vertical_alignment="center") if _suporta_alinhamento() else st.columns([5, 1])
-
-            with c1:
-                st.markdown(
-                    f'<div class="pre-item{" first" if numero == 0 else ""}">{html_pilula(item["tipo"])}'
-                    f'<div class="pre-title">{escape(item["titulo"])}</div>'
-                    f'<div class="pre-desc">{escape(trecho(item["descricao"]))}</div></div>',
-                    unsafe_allow_html=True,
-                )
-            with c2:
-                if st.button("Dominei", key=f"ov_dom_{item['id']}", **LARGURA_BTN):
-                    atualizar_registro(item["id"], {"status": "Dominado"}, "Marcado como dominado.", "🥊")
-                    st.rerun()
+            st.markdown(
+                f'<div class="pre-item{" first" if numero == 0 else ""}">{html_pilula(item["tipo"])}'
+                f'<div class="pre-title">{escape(item["titulo"])}</div>'
+                f'<div class="pre-desc">{escape(trecho(item["descricao"]))}</div></div>',
+                unsafe_allow_html=True,
+            )
 
         if len(pendentes) > 4:
             st.caption(f"Mais {len(pendentes) - 4} pendentes nas páginas de erros e correções.")
