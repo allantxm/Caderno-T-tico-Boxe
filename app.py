@@ -847,9 +847,14 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 .cal-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#E1262F;margin-right:.35rem;}
 .cal-dot.today{background:#F5F5F5;}
 .cal-note{color:var(--muted);font-size:.9rem;margin:.5rem 0 0;}
+.kpi-card{min-height:105px;padding:.25rem .15rem;}
+.kpi-icon{font-size:1.1rem;color:#FF303A;margin-bottom:.25rem;}
+.kpi-value{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:2rem;font-weight:700;line-height:1.05;color:#fff;}
+.kpi-label{font-size:.88rem;color:var(--muted);margin-top:.25rem;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker){background:#050505;border:1px solid rgba(225,38,47,.7)!important;border-radius:10px;box-shadow:0 0 6px rgba(225,38,47,.12);padding:.35rem;}
 div[data-testid="stHorizontalBlock"]:has(.calendar-marker){gap:.35rem;}
 .calendar-marker{display:none;}
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker){background:#090909;border:1px solid #292929;border-radius:8px;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker){background:#050505;border:1px solid rgba(225,38,47,.7)!important;border-radius:10px;box-shadow:0 0 6px rgba(225,38,47,.12);padding:.35rem;}
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) .stButton button{min-height:2.7rem;padding:.25rem;}
 """
     return "<style>" + base + por_tipo + "</style>"
@@ -1290,6 +1295,7 @@ def pagina_visao_geral():
     )
 
     formulario_novo("visao")
+    bloco_indicadores(df)
 
     esquerda, direita = st.columns([3, 2], gap="large")
 
@@ -1298,9 +1304,34 @@ def pagina_visao_geral():
         bloco_recentes(df)
 
     with direita:
-        bloco_por_tipo(df)
+        # O calendário fica acima de "Por tipo", conforme solicitado.
         bloco_calendario_treinos(df)
+        bloco_por_tipo(df)
         bloco_por_categoria(df)
+
+
+def bloco_indicadores(df):
+    """Cards-resumo rápidos para a visão geral."""
+    mes_atual = hoje().strftime("%Y-%m")
+    treinos_mes = df[(df["tipo"] == "Treino") & df["data"].astype(str).str.startswith(mes_atual)]
+    combos = int((df["tipo"] == "Combo").sum())
+    revisoes = int(df["tipo"].isin(TIPOS_REVISAO).sum())
+    favoritos = int(df["favorito"].sum())
+    cards = [
+        ("🥊", "Treinos neste mês", len(treinos_mes)),
+        ("⚡", "Combos anotados", combos),
+        ("🎯", "Revisões de sparring", revisoes),
+        ("★", "Favoritos", favoritos),
+    ]
+    cols = st.columns(4, gap="small")
+    for col, (icone, rotulo, valor) in zip(cols, cards):
+        with col:
+            with st.container(border=True):
+                st.markdown(
+                    f'<div class="kpi-card"><div class="kpi-icon">{icone}</div>'
+                    f'<div class="kpi-value">{valor}</div><div class="kpi-label">{escape(rotulo)}</div></div>',
+                    unsafe_allow_html=True,
+                )
 
 
 def bloco_antes_do_sparring(df):
@@ -1387,77 +1418,79 @@ def bloco_calendario_treinos(df):
     """Calendário mensal: dias com treino são destacados e abrem os registros daquele dia."""
     secao("Calendário de treinos", "Toque em um dia para abrir ou registrar o treino daquela data.")
 
-    mes = st.session_state.mes_calendario
-    c_prev, c_mes, c_next = st.columns([1, 4, 1])
-    with c_prev:
-        if st.button("‹", key="cal_mes_anterior", help="Mês anterior", **LARGURA_BTN):
-            anterior = mes.replace(day=1) - timedelta(days=1)
-            st.session_state.mes_calendario = anterior.replace(day=1)
-            st.rerun()
-    with c_mes:
-        st.markdown(
-            f'<div class="cal-head"><div class="cal-month">{MESES[mes.month - 1]} {mes.year}</div></div>',
-            unsafe_allow_html=True,
-        )
-    with c_next:
-        if st.button("›", key="cal_proximo_mes", help="Próximo mês", **LARGURA_BTN):
-            proximo = mes.replace(day=28) + timedelta(days=4)
-            st.session_state.mes_calendario = proximo.replace(day=1)
-            st.rerun()
-
-    treinos = df[(df["tipo"] == "Treino") & (df["data"] != "")]
-    datas_com_treino = set(treinos["data"].tolist())
-    dias = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
-    cols = st.columns(7, gap="small")
-    for col, dia_semana in zip(cols, dias):
-        with col:
+    with st.container(border=True):
+        st.markdown('<span class="calendar-marker"></span>', unsafe_allow_html=True)
+        mes = st.session_state.mes_calendario
+        c_prev, c_mes, c_next = st.columns([1, 4, 1])
+        with c_prev:
+            if st.button("‹", key="cal_mes_anterior", help="Mês anterior", **LARGURA_BTN):
+                anterior = mes.replace(day=1) - timedelta(days=1)
+                st.session_state.mes_calendario = anterior.replace(day=1)
+                st.rerun()
+        with c_mes:
             st.markdown(
-                f'<div style="text-align:center;color:#999;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
+                f'<div class="cal-head"><div class="cal-month">{MESES[mes.month - 1]} {mes.year}</div></div>',
                 unsafe_allow_html=True,
             )
+        with c_next:
+            if st.button("›", key="cal_proximo_mes", help="Próximo mês", **LARGURA_BTN):
+                proximo = mes.replace(day=28) + timedelta(days=4)
+                st.session_state.mes_calendario = proximo.replace(day=1)
+                st.rerun()
 
-    primeiro_dia_semana, total_dias = calendar.monthrange(mes.year, mes.month)
-    semanas = (primeiro_dia_semana + total_dias + 6) // 7
-    dia_atual = hoje()
-    dia_numero = 1
-
-    for semana in range(semanas):
+        treinos = df[(df["tipo"] == "Treino") & (df["data"] != "")]
+        datas_com_treino = set(treinos["data"].tolist())
+        dias = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
         cols = st.columns(7, gap="small")
-        for coluna in range(7):
-            indice_dia = semana * 7 + coluna
-            with cols[coluna]:
-                if indice_dia < primeiro_dia_semana or dia_numero > total_dias:
-                    st.markdown('<div style="height:2.7rem"></div>', unsafe_allow_html=True)
-                    continue
+        for col, dia_semana in zip(cols, dias):
+            with col:
+                st.markdown(
+                    f'<div style="text-align:center;color:#999;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
+                    unsafe_allow_html=True,
+                )
 
-                data_dia = date(mes.year, mes.month, dia_numero)
-                iso = data_dia.isoformat()
-                tem_treino = iso in datas_com_treino
-                eh_hoje = data_dia == dia_atual
-                rotulo = f'🥊 {dia_numero}' if tem_treino else str(dia_numero)
-                if eh_hoje:
-                    rotulo = f'• {rotulo}'
-                ajuda = "Abrir treino registrado" if tem_treino else "Registrar treino neste dia"
-                if st.button(
-                    rotulo,
-                    key=f"cal_dia_{iso}",
-                    help=f"{data_dia:%d/%m/%Y} — {ajuda}",
-                    type="primary" if tem_treino else "secondary",
-                    **LARGURA_BTN,
-                ):
-                    st.session_state.data_treino_selecionada = iso
-                    st.session_state.pagina = "Treinos"
-                    st.session_state.editando_id = None
-                    st.session_state.excluindo_id = None
-                    st.rerun()
-                dia_numero += 1
+        primeiro_dia_semana, total_dias = calendar.monthrange(mes.year, mes.month)
+        semanas = (primeiro_dia_semana + total_dias + 6) // 7
+        dia_atual = hoje()
+        dia_numero = 1
 
-    st.markdown(
-        '<div class="cal-legend"><span><i class="cal-dot"></i>Dia com treino (🥊)</span>'
-        '<span><i class="cal-dot today"></i>Hoje (•)</span></div>'
-        '<div class="cal-note">Os dias marcados com 🥊 já possuem pelo menos um registro do tipo Treino.</div>',
-        unsafe_allow_html=True,
-    )
+        for semana in range(semanas):
+            cols = st.columns(7, gap="small")
+            for coluna in range(7):
+                indice_dia = semana * 7 + coluna
+                with cols[coluna]:
+                    if indice_dia < primeiro_dia_semana or dia_numero > total_dias:
+                        st.markdown('<div style="height:2.7rem"></div>', unsafe_allow_html=True)
+                        continue
+
+                    data_dia = date(mes.year, mes.month, dia_numero)
+                    iso = data_dia.isoformat()
+                    tem_treino = iso in datas_com_treino
+                    eh_hoje = data_dia == dia_atual
+                    rotulo = f'🥊 {dia_numero}' if tem_treino else str(dia_numero)
+                    if eh_hoje:
+                        rotulo = f'• {rotulo}'
+                    ajuda = "Abrir treino registrado" if tem_treino else "Registrar treino neste dia"
+                    if st.button(
+                        rotulo,
+                        key=f"cal_dia_{iso}",
+                        help=f"{data_dia:%d/%m/%Y} — {ajuda}",
+                        type="primary" if tem_treino else "secondary",
+                        **LARGURA_BTN,
+                    ):
+                        st.session_state.data_treino_selecionada = iso
+                        st.session_state.pagina = "Treinos"
+                        st.session_state.editando_id = None
+                        st.session_state.excluindo_id = None
+                        st.rerun()
+                    dia_numero += 1
+
+        st.markdown(
+            '<div class="cal-legend"><span><i class="cal-dot"></i>Dia com treino (🥊)</span>'
+            '<span><i class="cal-dot today"></i>Hoje (•)</span></div>'
+            '<div class="cal-note">Os dias marcados com 🥊 já possuem pelo menos um registro do tipo Treino.</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def bloco_por_categoria(df):
@@ -1476,6 +1509,88 @@ def bloco_por_categoria(df):
         )
 
     st.markdown(linhas, unsafe_allow_html=True)
+
+
+def subtitulo_dados(df):
+    """Resumo curto para os cabeçalhos das páginas."""
+    favoritos = int(df["favorito"].sum()) if "favorito" in df.columns else 0
+    return f"{plural(len(df), 'registro', 'registros')}, {plural(favoritos, 'favorito', 'favoritos')}"
+
+
+def lista_de_registros(df_base, chave, filtrar_tipo=False, vazio=None):
+    """Filtros e cartões de registros, sem o antigo campo/status 'Dominado'."""
+    if len(df_base) == 0:
+        titulo, texto = vazio or ("Nada por aqui ainda.", "Adicione um registro no botão acima.")
+        estado_vazio(titulo, texto)
+        return
+
+    busca = st.text_input(
+        "Buscar", placeholder="Buscar por título, descrição, fonte ou categoria",
+        label_visibility="collapsed", key=f"busca_{chave}"
+    )
+    colunas = st.columns([2, 2, 2, 2, 2] if filtrar_tipo else [2, 2, 2, 2])
+    pos = iter(colunas)
+
+    tipo = "Todos"
+    if filtrar_tipo:
+        with next(pos):
+            tipo = st.selectbox("Tipo", ["Todos"] + TIPOS, key=f"tipo_{chave}")
+    with next(pos):
+        categorias = ["Todas"] + sorted(c for c in df_base["categoria"].unique() if c)
+        categoria = st.selectbox("Categoria", categorias, key=f"cat_{chave}")
+    with next(pos):
+        dificuldade = st.selectbox("Dificuldade", ["Todas"] + DIFICULDADES, key=f"dif_{chave}")
+    with next(pos):
+        ordem = st.selectbox(
+            "Ordenar por", ["Mais recentes", "Mais antigos", "Título (A a Z)", "Mais difíceis primeiro", "Favoritos primeiro"],
+            key=f"ord_{chave}"
+        )
+
+    so_favoritos = st.toggle("Só favoritos", key=f"fav_{chave}")
+    resultado = df_base.copy().assign(_pos=lambda x: x.index)
+
+    if tipo != "Todos":
+        resultado = resultado[resultado["tipo"] == tipo]
+    if categoria != "Todas":
+        resultado = resultado[resultado["categoria"] == categoria]
+    if dificuldade != "Todas":
+        resultado = resultado[resultado["dificuldade"] == dificuldade]
+    if so_favoritos:
+        resultado = resultado[resultado["favorito"]]
+    if busca.strip():
+        termos = normalizar_texto(busca).split()
+        texto_busca = (resultado["titulo"] + " " + resultado["descricao"] + " " + resultado["categoria"] + " " + resultado["fonte"] + " " + resultado["tipo"]).map(normalizar_texto)
+        mascara = pd.Series(True, index=resultado.index)
+        for termo in termos:
+            mascara &= texto_busca.str.contains(termo, regex=False, na=False)
+        resultado = resultado[mascara]
+
+    if ordem == "Mais antigos":
+        resultado = resultado.sort_values(["data", "_pos"], ascending=[True, True])
+    elif ordem == "Título (A a Z)":
+        resultado = resultado.assign(_t=resultado["titulo"].map(normalizar_texto)).sort_values("_t")
+    elif ordem == "Mais difíceis primeiro":
+        peso = {"Fácil": 1, "Médio": 2, "Difícil": 3}
+        resultado = resultado.assign(_d=resultado["dificuldade"].map(peso)).sort_values(["_d", "_pos"], ascending=[False, False])
+    elif ordem == "Favoritos primeiro":
+        resultado = resultado.sort_values(["favorito", "_pos"], ascending=[False, False])
+    else:
+        resultado = resultado.sort_values(["data", "_pos"], ascending=[False, False])
+
+    st.caption(plural(len(resultado), "registro encontrado", "registros encontrados"))
+    if resultado.empty:
+        estado_vazio("Nenhum registro com esses filtros.", "Limpe a busca ou escolha outras opções.")
+        return
+
+    chave_limite = f"limite_{chave}"
+    limite = st.session_state.get(chave_limite, ITENS_POR_PAGINA)
+    for _, registro in resultado.head(limite).iterrows():
+        cartao_registro(registro, chave)
+    if len(resultado) > limite:
+        restantes = len(resultado) - limite
+        if st.button(f"Mostrar mais ({restantes})", key=f"mais_{chave}", **LARGURA_BTN):
+            st.session_state[chave_limite] = limite + ITENS_POR_PAGINA
+            st.rerun()
 
 
 def pagina_caderno():
