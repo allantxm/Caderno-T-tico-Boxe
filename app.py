@@ -879,7 +879,9 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker),
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div {
   background: #050505 !important;
   border: 1px solid rgba(225,38,47,.88) !important;
   outline: 1px solid rgba(225,38,47,.55) !important;
@@ -897,6 +899,37 @@ div[data-testid="stVerticalBlock"]:has(.hm) {
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
+  padding: .4rem !important;
+}
+/* Cards KPI: desenha o neon num pseudo-elemento para contornar diferenças
+   entre versões do DOM do Streamlit. O texto e o fundo não são alterados. */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) {
+  position: relative !important;
+  border: 1px solid transparent !important;
+  outline: none !important;
+  border-radius: 10px !important;
+  background: #050505 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  animation: none !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card)::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 5 !important;
+  pointer-events: none !important;
+  border: 1px solid rgba(225,38,47,.9) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 0 5px rgba(225,38,47,.24), inset 0 0 3px rgba(225,38,47,.07) !important;
+  animation: neonFrame 2.8s ease-in-out infinite !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div > div {
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: #050505 !important;
+  box-shadow: none !important;
   padding: .4rem !important;
 }
 div[data-testid="stHorizontalBlock"]:has(.calendar-marker){gap:.35rem;}
