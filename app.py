@@ -855,7 +855,12 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 .cal-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#E1262F;margin-right:.35rem;}
 .cal-dot.today{background:#F5F5F5;}
 .cal-note{color:var(--muted);font-size:.9rem;margin:.5rem 0 0;}
-.kpi-card{min-height:105px;padding:.25rem .15rem;}
+.kpi-card{
+  box-sizing:border-box; min-height:105px; height:100%; padding:.75rem .85rem;
+  background:#000 !important; border:1px solid #E1262F !important; border-radius:10px;
+  box-shadow:0 0 6px rgba(225,38,47,.24), inset 0 0 3px rgba(225,38,47,.06);
+  animation:neonFrame 2.8s ease-in-out infinite;
+}
 .kpi-icon{font-size:1.1rem;color:#FF303A;margin-bottom:.25rem;}
 .kpi-value{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:2rem;font-weight:700;line-height:1.05;color:#fff;}
 .kpi-label{font-size:.88rem;color:var(--muted);margin-top:.25rem;}
@@ -901,36 +906,16 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
   padding: .4rem !important;
 }
-/* Cards KPI: desenha o neon num pseudo-elemento para contornar diferenças
-   entre versões do DOM do Streamlit. O texto e o fundo não são alterados. */
+/* Os cards KPI têm borda aplicada diretamente no HTML (.kpi-card),
+   sem depender do wrapper nativo de borda do Streamlit. */
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) {
-  position: relative !important;
-  border: 1px solid transparent !important;
-  outline: none !important;
-  border-radius: 10px !important;
-  background: #050505 !important;
-  box-shadow: none !important;
-  overflow: visible !important;
-  animation: none !important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card)::before {
-  content: "" !important;
-  position: absolute !important;
-  inset: 0 !important;
-  z-index: 5 !important;
-  pointer-events: none !important;
-  border: 1px solid rgba(225,38,47,.9) !important;
-  border-radius: 10px !important;
-  box-shadow: 0 0 5px rgba(225,38,47,.24), inset 0 0 3px rgba(225,38,47,.07) !important;
-  animation: neonFrame 2.8s ease-in-out infinite !important;
+  border:0 !important; outline:0 !important; box-shadow:none !important;
+  background:transparent !important; padding:0 !important; animation:none !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div > div {
-  border: 0 !important;
-  border-radius: 10px !important;
-  background: #050505 !important;
-  box-shadow: none !important;
-  padding: .4rem !important;
+  border:0 !important; outline:0 !important; background:transparent !important;
+  box-shadow:none !important; padding:0 !important;
 }
 div[data-testid="stHorizontalBlock"]:has(.calendar-marker){gap:.35rem;}
 .calendar-marker,.recentes-marker{display:none;}
@@ -1407,12 +1392,13 @@ def bloco_indicadores(df):
     cols = st.columns(4, gap="small")
     for col, (icone, rotulo, valor) in zip(cols, cards):
         with col:
-            with st.container(border=True):
-                st.markdown(
-                    f'<div class="kpi-card"><div class="kpi-icon">{icone}</div>'
-                    f'<div class="kpi-value">{valor}</div><div class="kpi-label">{escape(rotulo)}</div></div>',
-                    unsafe_allow_html=True,
-                )
+            # A borda fica no próprio HTML, não no container nativo do Streamlit.
+            # Assim o contorno vermelho neon não é substituído pela borda cinza padrão.
+            st.markdown(
+                f'<div class="kpi-card"><div class="kpi-icon">{icone}</div>'
+                f'<div class="kpi-value">{valor}</div><div class="kpi-label">{escape(rotulo)}</div></div>',
+                unsafe_allow_html=True,
+            )
 
 
 def bloco_antes_do_sparring(df):
