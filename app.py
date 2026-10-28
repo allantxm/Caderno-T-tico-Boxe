@@ -632,7 +632,7 @@ def montar_css():
 
 :root{
   --bg:#000000; --surface:#080808; --raised:#141414; --line:#292929;
-  --text:#F5F5F5; --muted:#FF555D; --accent:#E1262F; --gold:#E8C547; --ok:#7CC47C;
+  --text:#F5F5F5; --muted:#A7A7A7; --accent:#E1262F; --gold:#E8C547; --ok:#7CC47C;
 }
 
 html, body, .stApp, p, li, label, input, textarea, button, a,
@@ -663,6 +663,14 @@ h1, h2, h3, .page-title, .sec, .brand-name{
 }
 .stApp .sec-sub{ color:var(--muted); font-size:.98rem; margin:0 0 .9rem; }
 @media (max-width:640px){ .stApp .page-title{ font-size:2.5rem; } }
+
+
+/* Textos secundários permanecem cinza; vermelho é reservado para acentos e bordas. */
+.stApp .page-sub, .stApp .sec-sub, .brand-sub, .side-title, .sync,
+.sync-erro, [data-testid="stCaptionContainer"], .card-meta, .card-date,
+.card-src, .pre-desc, .cal-legend, .cal-note, .kpi-label, .recente .d {
+  color: var(--muted) !important;
+}
 
 /* ---------- Barra lateral ---------- */
 section[data-testid="stSidebar"]{
@@ -851,46 +859,45 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
 .kpi-icon{font-size:1.1rem;color:#FF303A;margin-bottom:.25rem;}
 .kpi-value{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:2rem;font-weight:700;line-height:1.05;color:#fff;}
 .kpi-label{font-size:.88rem;color:var(--muted);margin-top:.25rem;}
-/* Força a borda neon nos containers do Streamlit, inclusive no elemento interno
-   que algumas versões usam para desenhar a borda padrão cinza. */
+/* Bordas neon animadas nos quadros marcados: calendário, antes do sparring e últimos registros.
+   Mantém todos os textos auxiliares na cor cinza definida em --muted. */
 @keyframes neonFrame {
   0%, 100% {
-    border-color: rgba(225,38,47,.72) !important;
-    box-shadow: 0 0 4px rgba(225,38,47,.18), inset 0 0 3px rgba(225,38,47,.04) !important;
+    border-color: rgba(225,38,47,.88) !important;
+    outline-color: rgba(225,38,47,.72) !important;
+    box-shadow: 0 0 5px rgba(225,38,47,.20), inset 0 0 3px rgba(225,38,47,.06) !important;
   }
   50% {
     border-color: rgba(255,48,58,1) !important;
-    box-shadow: 0 0 11px rgba(225,38,47,.42), inset 0 0 5px rgba(225,38,47,.10) !important;
+    outline-color: rgba(255,48,58,.95) !important;
+    box-shadow: 0 0 12px rgba(225,38,47,.42), inset 0 0 5px rgba(225,38,47,.12) !important;
   }
 }
-/* Bordas neon animadas: aplica no wrapper e no elemento interno que o Streamlit
-   pode usar para desenhar a borda padrão cinza. */
+/* Streamlit varia a estrutura do container entre versões; estilizamos o wrapper e o painel interno. */
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker),
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker),
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm),
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
-  background:#050505 !important;
-  border:1px solid rgba(225,38,47,.82) !important;
-  border-radius:10px !important;
-  box-shadow:0 0 6px rgba(225,38,47,.20) !important;
-  animation:neonFrame 3.8s ease-in-out infinite !important;
+  background: #050505 !important;
+  border: 1px solid rgba(225,38,47,.88) !important;
+  outline: 1px solid rgba(225,38,47,.55) !important;
+  outline-offset: -2px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 0 6px rgba(225,38,47,.22) !important;
+  animation: neonFrame 3.2s ease-in-out infinite !important;
+}
+/* Fallback para versões que desenham a borda no bloco interno, não no wrapper. */
+div[data-testid="stVerticalBlock"]:has(.calendar-marker),
+div[data-testid="stVerticalBlock"]:has(.recentes-marker),
+div[data-testid="stVerticalBlock"]:has(.hm) {
+  border-color: rgba(225,38,47,.88) !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
-  padding:.4rem;
-}
-/* Fallback para versões do Streamlit que colocam a borda no segundo nível. */
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div > div,
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div > div,
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div > div {
-  border-color:rgba(225,38,47,.82) !important;
-  border-radius:10px !important;
-  box-shadow:0 0 6px rgba(225,38,47,.18) !important;
-  animation:neonFrame 3.8s ease-in-out infinite !important;
-  background:transparent !important;
+  padding: .4rem !important;
 }
 div[data-testid="stHorizontalBlock"]:has(.calendar-marker){gap:.35rem;}
 .calendar-marker,.recentes-marker{display:none;}
@@ -1488,7 +1495,7 @@ def bloco_calendario_treinos(df):
         for col, dia_semana in zip(cols, dias):
             with col:
                 st.markdown(
-                    f'<div style="text-align:center;color:#FF555D;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
+                    f'<div style="text-align:center;color:#A7A7A7;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
                     unsafe_allow_html=True,
                 )
 
