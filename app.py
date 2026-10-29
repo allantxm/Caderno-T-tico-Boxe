@@ -42,7 +42,7 @@ st.set_page_config(
     page_title="Caderno Tático de Boxe",
     page_icon="🥊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 
@@ -773,6 +773,103 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm),
 .cal-shell, div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) {
   animation:neonBoxe 4.5s ease-in-out infinite;
 }
+/* ---------- Ajustes exclusivos para celular ---------- */
+@media (max-width: 640px) {
+  .block-container {
+    max-width: 100% !important;
+    padding: .9rem .72rem 2rem !important;
+  }
+  .stApp .page-title {
+    font-size: 2.05rem !important;
+    line-height: 1.04 !important;
+    overflow-wrap: anywhere;
+  }
+  .stApp .page-sub { font-size: .92rem !important; margin: .35rem 0 1rem !important; }
+  .stApp .sec { font-size: 1.45rem !important; margin: 1.35rem 0 .3rem !important; }
+  .stApp .sec-sub { font-size: .9rem !important; line-height: 1.35 !important; }
+  [data-testid="stVerticalBlock"] { gap: .65rem !important; }
+  [data-testid="stHorizontalBlock"] { gap: .5rem !important; }
+
+  /* Empilha Antes do sparring, Últimos registros e Calendário em uma coluna. */
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="column"] .overview-layout-marker) {
+    flex-wrap: wrap !important;
+    align-items: stretch !important;
+    gap: .65rem !important;
+  }
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="column"] .overview-layout-marker) > [data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .overview-layout-marker) > [data-testid="stColumn"] {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+  .overview-layout-marker { display: none !important; }
+
+  /* Indicadores em grade 2 x 2, com toque confortável. */
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="column"] .kpi-card),
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .kpi-card) {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: .55rem !important;
+  }
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="column"] .kpi-card) > [data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .kpi-card) > [data-testid="stColumn"] {
+    flex: 1 1 calc(50% - .3rem) !important;
+    width: calc(50% - .3rem) !important;
+    min-width: calc(50% - .3rem) !important;
+  }
+  .kpi-card { min-height: 94px !important; padding: .65rem !important; border-radius: 9px !important; }
+  .kpi-value { font-size: 1.8rem !important; }
+  .kpi-label { font-size: .78rem !important; line-height: 1.2 !important; }
+
+  /* Calendário: mantém os sete dias lado a lado, reduzindo espaçamentos. */
+  .cal-month { font-size: 1.25rem !important; text-align: center; }
+  .cal-head { gap: .25rem !important; margin-bottom: .5rem !important; }
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) { padding: .15rem !important; }
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) .stButton > button {
+    min-height: 2.05rem !important;
+    height: auto !important;
+    padding: .15rem 0 !important;
+    font-size: .76rem !important;
+    line-height: 1.05 !important;
+    white-space: normal !important;
+  }
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) [data-testid="stHorizontalBlock"] {
+    gap: .2rem !important;
+  }
+  .cal-legend { gap: .45rem .7rem !important; font-size: .78rem !important; }
+  .cal-note { font-size: .8rem !important; line-height: 1.35 !important; }
+
+  /* Registros e formulários sem texto cortado e com botões fáceis de tocar. */
+  .card-title { font-size: 1.45rem !important; overflow-wrap: anywhere; }
+  .card-top { gap: .35rem .5rem !important; }
+  .card-date { margin-left: 0 !important; font-size: .8rem !important; }
+  .recente { gap: .3rem .5rem !important; padding: .55rem 0 !important; }
+  .recente .t { flex-basis: 100% !important; }
+  .recente .d { font-size: .78rem !important; }
+  .pre-title { font-size: 1.2rem !important; }
+  .pre-desc { font-size: .88rem !important; overflow-wrap: anywhere; }
+  .bar-row { grid-template-columns: minmax(85px, 36%) 1fr 25px !important; gap: .45rem !important; }
+  .bar-label, .bar-n { font-size: .82rem !important; }
+  .stApp .stButton > button,
+  .stApp .stDownloadButton > button,
+  .stApp [data-testid="stFormSubmitButton"] > button,
+  .stApp a[data-testid="stBaseLinkButton-secondary"] {
+    min-height: 2.65rem !important;
+  }
+  [data-testid="stTextInput"] input,
+  [data-testid="stTextArea"] textarea,
+  [data-baseweb="select"] { font-size: 16px !important; }
+  [data-testid="stForm"] { padding: .7rem !important; }
+
+  /* Evita o fundo fixo em navegadores móveis e mantém contraste do conteúdo. */
+  .stApp { background-attachment: scroll !important; background-position: center top !important; }
+  section[data-testid="stSidebar"] { max-width: 86vw !important; }
+}
+
+@media (min-width: 641px) {
+  .overview-layout-marker { display: none !important; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; }
 }
@@ -1394,6 +1491,8 @@ def pagina_visao_geral():
     esquerda, direita = st.columns([3, 2], gap="large")
 
     with esquerda:
+        # Marcador para empilhar as duas áreas principais apenas em telas estreitas.
+        st.markdown('<span class="overview-layout-marker"></span>', unsafe_allow_html=True)
         bloco_antes_do_sparring(df)
         bloco_recentes(df)
 
