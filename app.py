@@ -3,28 +3,20 @@ Caderno Tático de Boxe
 Diário pessoal de técnicas, combos, defesas, erros de sparring e treinos.
 
 Dados: ficam em memória durante a sessão e são sincronizados com um
-arquivo JSON num repositório do GitHub.
-
-Secrets (Streamlit):
-  GITHUB_TOKEN, GITHUB_REPO         obrigatórios para usar a nuvem
-  GITHUB_FILE, GITHUB_BRANCH        opcionais
-  APP_PASSWORD                      opcional: pede senha para abrir o app
-
-Fundo opcional: coloque boxing_background.png na mesma pasta do app.py.
+arquivo JSON num repositório do GitHub (Secrets: GITHUB_TOKEN, GITHUB_REPO,
+e opcionalmente GITHUB_FILE e GITHUB_BRANCH).
 """
 
 import base64
 import calendar
-import hmac
 import inspect
 import io
 import json
-import time
+from pathlib import Path
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta
 from html import escape
-from pathlib import Path
 from urllib.parse import quote
 
 import pandas as pd
@@ -94,7 +86,6 @@ CATEGORIAS = [
 ]
 
 DIFICULDADES = ["Fácil", "Médio", "Difícil"]
-PESO_DIFICULDADE = {"Fácil": 1, "Médio": 2, "Difícil": 3}
 TIPOS_REVISAO = ["Erro no Sparring", "Correção do Professor"]
 
 # (rótulo no menu, tipo filtrado ou None)
@@ -123,17 +114,8 @@ VALORES_PADRAO = {
     "data": "",
 }
 
-ORDENACOES = [
-    "Mais recentes",
-    "Mais antigos",
-    "Título (A a Z)",
-    "Mais difíceis primeiro",
-    "Favoritos primeiro",
-]
-
 GITHUB_API = "https://api.github.com"
 ITENS_POR_PAGINA = 10
-ARQUIVO_FUNDO = "boxing_background.png"
 
 MESES = [
     "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -212,10 +194,6 @@ def para_date(iso):
         return hoje()
 
 
-def data_por_extenso(dia):
-    return f"{DIAS_SEMANA[dia.weekday()].capitalize()}, {dia.day} de {MESES[dia.month - 1]}"
-
-
 def normalizar_link(link):
     link = str(link or "").strip()
     if link and not link.lower().startswith(("http://", "https://")):
@@ -253,7 +231,7 @@ def converter_favorito(valor):
 def preparar_dataframe(df):
     """
     Garante colunas, tipos e valores válidos. Aceita dados antigos
-    (sem 'descricao', com colunas a mais, etc.) e planilhas importadas.
+    (sem 'descricao', etc.) e dados antigos.
     """
     if df is None:
         return criar_dataframe_vazio()
@@ -270,7 +248,9 @@ def preparar_dataframe(df):
     for coluna in COLUNAS:
         if coluna == "favorito":
             continue
-        df[coluna] = df[coluna].apply(lambda v: "" if pd.isna(v) else str(v).strip())
+        df[coluna] = df[coluna].apply(
+            lambda v: "" if pd.isna(v) else str(v).strip()
+        )
 
     # IDs únicos (gera para os ausentes e para os repetidos)
     vistos, ids = set(), []
@@ -283,7 +263,8 @@ def preparar_dataframe(df):
 
     # Valores de listas fechadas (ignora maiúsculas/minúsculas)
     def forcar(valor, opcoes, padrao):
-        return {o.lower(): o for o in opcoes}.get(valor.lower(), padrao)
+        mapa = {o.lower(): o for o in opcoes}
+        return mapa.get(valor.lower(), padrao)
 
     df["tipo"] = df["tipo"].apply(lambda v: forcar(v, TIPOS, "Dica"))
     df["dificuldade"] = df["dificuldade"].apply(lambda v: forcar(v, DIFICULDADES, "Médio"))
@@ -292,26 +273,6 @@ def preparar_dataframe(df):
     df["favorito"] = df["favorito"].apply(converter_favorito).astype(bool)
 
     return df
-
-
-def datas_de_treino(df):
-    """Conjunto de datas (AAAA-MM-DD) que têm pelo menos um registro de Treino."""
-    treinos = df[(df["tipo"] == "Treino") & (df["data"] != "")]
-    return set(treinos["data"])
-
-
-def sequencia_de_treinos(datas_iso, referencia):
-    """
-    Quantos dias seguidos o aluno treinou. Se hoje ainda não tem treino,
-    a sequência continua valendo a partir de ontem.
-    """
-    dias = {para_date(d) for d in datas_iso}
-    dia = referencia if referencia in dias else referencia - timedelta(days=1)
-    total = 0
-    while dia in dias:
-        total += 1
-        dia -= timedelta(days=1)
-    return total
 
 
 # ============================================================
@@ -395,6 +356,13 @@ def github_headers(token, aceitar="application/vnd.github+json"):
 
 def _url_arquivo(repo, arquivo):
     return f"{GITHUB_API}/repos/{repo}/contents/{quote(arquivo, safe='/')}"
+
+
+def _detalhe_erro(resposta):
+    try:
+        return resposta.json().get("message", "")
+    except Exception:
+        return ""
 
 
 def carregar_github():
@@ -521,7 +489,8 @@ def gerar_excel(df):
 
     larguras = {
         "id": 18, "tipo": 22, "titulo": 36, "categoria": 26, "descricao": 70,
-        "fonte": 26, "link_video": 40, "dificuldade": 13, "favorito": 10, "data": 12,
+        "fonte": 26, "link_video": 40, "dificuldade": 13,
+        "favorito": 10, "data": 12,
     }
     for posicao, coluna in enumerate(COLUNAS, start=1):
         ws.column_dimensions[get_column_letter(posicao)].width = larguras[coluna]
@@ -536,44 +505,6 @@ def gerar_excel(df):
 
 def gerar_backup_json(df):
     return json.dumps(dataframe_para_json(df), ensure_ascii=False, indent=2).encode("utf-8")
-
-
-# ============================================================
-# ACESSO COM SENHA (opcional)
-# ============================================================
-
-def exigir_senha():
-    """
-    Se APP_PASSWORD estiver nos Secrets, nada é carregado nem exibido
-    antes de a senha ser digitada.
-    """
-    senha = str(_segredo("APP_PASSWORD", ""))
-
-    if not senha or st.session_state.get("autenticado"):
-        return
-
-    st.markdown(
-        '<h1 class="page-title">Caderno tático</h1>'
-        '<div class="page-sub">Digite a senha para abrir seu caderno.</div>',
-        unsafe_allow_html=True,
-    )
-
-    with st.form("form_login"):
-        tentativa = st.text_input("Senha", type="password")
-        entrar = st.form_submit_button("Entrar", type="primary")
-
-    if entrar:
-        if hmac.compare_digest(tentativa.encode("utf-8"), senha.encode("utf-8")):
-            st.session_state.autenticado = True
-            st.rerun()
-
-        # Pausa crescente a cada erro, para dificultar tentativas em sequência
-        erros = st.session_state.get("tentativas_senha", 0) + 1
-        st.session_state.tentativas_senha = erros
-        time.sleep(min(erros, 5))
-        st.error("Senha incorreta.")
-
-    st.stop()
 
 
 # ============================================================
@@ -599,14 +530,7 @@ def iniciar_estado():
     st.session_state.setdefault("excluindo_id", None)
     st.session_state.setdefault("avisos", [])
     st.session_state.setdefault("confirmar_recarga", False)
-
-
-def ir_para(pagina, data_treino=""):
-    """Troca de página limpando qualquer edição ou filtro de data pendente."""
-    st.session_state.pagina = pagina
-    st.session_state.data_treino_selecionada = data_treino
-    st.session_state.editando_id = None
-    st.session_state.excluindo_id = None
+    st.session_state.setdefault("uploader_versao", 0)
 
 
 def avisar(texto, icone="✅"):
@@ -675,28 +599,12 @@ def excluir_registro(id_registro):
     confirmar_mudanca(df, "Registro excluído.", "🗑️")
 
 
-def adicionar_registro(campos, mensagem="Registro adicionado."):
+def adicionar_registro(campos):
     novo = {"id": novo_id(), **campos}
-    df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
-    confirmar_mudanca(df, mensagem)
-
-
-def marcar_dia_como_treinado(iso):
-    """Cria um treino simples para o dia; os detalhes podem ser editados depois."""
-    adicionar_registro(
-        {
-            "tipo": "Treino",
-            "titulo": "Treino",
-            "categoria": "Condicionamento",
-            "descricao": "Treino marcado pelo calendário. Edite para adicionar os detalhes.",
-            "fonte": "",
-            "link_video": "",
-            "dificuldade": "Médio",
-            "favorito": False,
-            "data": iso,
-        },
-        mensagem="Dia marcado como treinado.",
+    df = pd.concat(
+        [st.session_state.df, pd.DataFrame([novo])], ignore_index=True
     )
+    confirmar_mudanca(df, "Registro adicionado.")
 
 
 def mostrar_avisos():
@@ -709,18 +617,23 @@ def mostrar_avisos():
 # ESTILO
 # ============================================================
 
-# Painéis com contorno neon: o marcador invisível dentro do container
-# identifica qual deles estilizar (via :has).
-PAINEIS_NEON = ("hm", "calendar-marker", "recentes-marker")
-CALENDARIO = "div[data-testid='stVerticalBlockBorderWrapper']:has(.calendar-marker)"
+def montar_css():
+    # Regras por tipo (a fita colorida lateral e as pílulas)
+    por_tipo = ""
+    for info in TIPOS_INFO.values():
+        classe, cor = info["css"], info["cor"]
+        por_tipo += (
+            f".{classe}{{--c:{cor};}}"
+            f"div[data-testid='stVerticalBlockBorderWrapper']:has(.cm.{classe})"
+            f"{{border-left:5px solid {cor} !important;}}"
+        )
 
-CSS_BASE = """
+    base = """
 @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap');
 
 :root{
-  --bg:#000; --surface:#080808; --raised:#141414; --line:#292929;
-  --text:#F5F5F5; --muted:#A7A7A7;
-  --accent:#E1262F; --accent-hi:#FF303A; --gold:#E8C547; --ok:#7CC47C;
+  --bg:#000000; --surface:#080808; --raised:#141414; --line:#292929;
+  --text:#F5F5F5; --muted:#A7A7A7; --accent:#E1262F; --gold:#E8C547; --ok:#7CC47C;
 }
 
 html, body, .stApp, p, li, label, input, textarea, button, a,
@@ -735,17 +648,6 @@ html, body, .stApp, p, li, label, input, textarea, button, a,
 header[data-testid="stHeader"]{ background:transparent; }
 #MainMenu, footer, .stDeployButton{ visibility:hidden; }
 [data-testid="stHeaderActionElements"]{ display:none; }
-
-/* Marcadores invisíveis (e a linha que eles ocupariam no layout) */
-.cm, .hm, .calendar-marker, .recentes-marker, .acoes-marker, .d-marca{ display:none; }
-.element-container:has(.hm), .element-container:has(.calendar-marker),
-.element-container:has(.recentes-marker), .element-container:has(.acoes-marker),
-.element-container:has(.d-marca),
-[data-testid="stElementContainer"]:has(.hm),
-[data-testid="stElementContainer"]:has(.calendar-marker),
-[data-testid="stElementContainer"]:has(.recentes-marker),
-[data-testid="stElementContainer"]:has(.acoes-marker),
-[data-testid="stElementContainer"]:has(.d-marca){ display:none; }
 
 /* ---------- Tipografia ---------- */
 h1, h2, h3, .page-title, .sec, .brand-name{
@@ -762,11 +664,18 @@ h1, h2, h3, .page-title, .sec, .brand-name{
 }
 .stApp .sec-sub{ color:var(--muted); font-size:.98rem; margin:0 0 .9rem; }
 @media (max-width:640px){ .stApp .page-title{ font-size:2.5rem; } }
-[data-testid="stCaptionContainer"]{ color:var(--muted); }
+
+
+/* Textos secundários permanecem cinza; vermelho é reservado para acentos e bordas. */
+.stApp .page-sub, .stApp .sec-sub, .brand-sub, .side-title, .sync,
+.sync-erro, [data-testid="stCaptionContainer"], .card-meta, .card-date,
+.card-src, .pre-desc, .cal-legend, .cal-note, .kpi-label, .recente .d {
+  color: var(--muted) !important;
+}
 
 /* ---------- Barra lateral ---------- */
 section[data-testid="stSidebar"]{
-  background:rgba(0,0,0,.88); border-right:1px solid var(--line);
+  background:var(--surface); border-right:1px solid var(--line);
 }
 section[data-testid="stSidebar"] > div{ padding-top:.4rem; }
 .brand{ padding:.9rem .75rem 1.1rem; }
@@ -775,7 +684,6 @@ section[data-testid="stSidebar"] > div{ padding-top:.4rem; }
 .brand-sub{ display:block; color:var(--muted); font-size:.95rem; margin-top:.3rem; }
 .side-title{ color:var(--muted); font-size:.9rem; font-weight:600; padding:1rem .75rem .3rem; }
 
-/* Itens do menu alinhados à esquerda (o texto fica dentro de div > p) */
 section[data-testid="stSidebar"] .stButton > button,
 section[data-testid="stSidebar"] .stDownloadButton > button{
   justify-content:flex-start; text-align:left; background:transparent;
@@ -783,22 +691,15 @@ section[data-testid="stSidebar"] .stDownloadButton > button{
   color:var(--muted); font-weight:500; font-size:1rem;
   padding:.45rem .75rem; box-shadow:none; min-height:2.3rem;
 }
-section[data-testid="stSidebar"] .stButton > button > div,
-section[data-testid="stSidebar"] .stDownloadButton > button > div,
-section[data-testid="stSidebar"] .stButton [data-testid="stMarkdownContainer"],
-section[data-testid="stSidebar"] .stDownloadButton [data-testid="stMarkdownContainer"]{
-  width:100%; justify-content:flex-start; text-align:left;
-}
-section[data-testid="stSidebar"] .stButton > button p,
-section[data-testid="stSidebar"] .stDownloadButton > button p{ text-align:left; width:100%; }
 section[data-testid="stSidebar"] .stButton > button:hover,
 section[data-testid="stSidebar"] .stDownloadButton > button:hover{
   background:var(--raised); color:var(--text); border-left-color:transparent;
 }
 section[data-testid="stSidebar"] .stButton > button[kind="primary"],
 section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"]{
-  background:rgba(225,38,47,.16); color:#fff; border-left:3px solid var(--accent);
+  background:rgba(219,58,63,.16); color:#fff; border-left:3px solid var(--accent);
 }
+section[data-testid="stSidebar"] .stButton > button p{ text-align:left; }
 
 .sync{ display:flex; align-items:center; gap:.55rem; color:var(--muted); font-size:.92rem; padding:.2rem .75rem .5rem; }
 .sync i{ width:9px; height:9px; border-radius:50%; background:var(--line); flex:none; }
@@ -837,33 +738,54 @@ section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-pr
 .stApp button:focus-visible, .stApp a:focus-visible{ outline:2px solid var(--gold); outline-offset:2px; }
 
 /* ---------- Campos, expansores, formulários ---------- */
-/* Contorno vermelho estático; o brilho aparece só no foco (sem animação contínua). */
+[data-testid="stExpander"] details{
+  border:1px solid var(--line); border-radius:8px; background:var(--surface);
+}
+[data-testid="stForm"]{ border:1px solid var(--line); border-radius:8px; background:transparent; }
+[data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"]{ border-radius:6px; }
+[data-testid="stCaptionContainer"]{ color:var(--muted); }
+
+/* Borda neon vermelha sutil e animada nos campos e quadros */
+@keyframes neonBoxe {
+  0%, 100% { border-color:rgba(225,38,47,.48); box-shadow:0 0 3px rgba(225,38,47,.08); }
+  50% { border-color:rgba(255,45,55,.95); box-shadow:0 0 7px rgba(225,38,47,.22), inset 0 0 2px rgba(225,38,47,.08); }
+}
 [data-testid="stTextInput"] [data-baseweb="input"],
 [data-testid="stTextArea"] [data-baseweb="textarea"],
 [data-testid="stNumberInput"] [data-baseweb="input"],
 [data-testid="stSelectbox"] [data-baseweb="select"] > div,
-[data-testid="stDateInput"] [data-baseweb="input"]{
-  border:1px solid rgba(225,38,47,.5) !important; border-radius:6px;
+[data-testid="stDateInput"] [data-baseweb="input"] {
+  border:1px solid rgba(225,38,47,.55) !important;
+  animation:neonBoxe 3.8s ease-in-out infinite;
   transition:box-shadow .2s ease, border-color .2s ease;
 }
 [data-testid="stTextInput"] [data-baseweb="input"]:focus-within,
 [data-testid="stTextArea"] [data-baseweb="textarea"]:focus-within,
 [data-testid="stNumberInput"] [data-baseweb="input"]:focus-within,
 [data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within,
-[data-testid="stDateInput"] [data-baseweb="input"]:focus-within{
-  border-color:var(--accent-hi) !important;
-  box-shadow:0 0 9px rgba(225,38,47,.35) !important;
+[data-testid="stDateInput"] [data-baseweb="input"]:focus-within {
+  border-color:#FF303A !important;
+  box-shadow:0 0 9px rgba(225,38,47,.32) !important;
 }
-[data-testid="stExpander"] details,
-[data-testid="stForm"]{
-  border:1px solid rgba(225,38,47,.45); border-radius:8px;
-  background:rgba(8,8,8,.86);
+[data-testid="stForm"], [data-testid="stExpander"] details,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm),
+.cal-shell, div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) {
+  animation:neonBoxe 4.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; }
 }
 
 /* ---------- Cartões de registro ---------- */
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm){
-  background:rgba(8,8,8,.86); border:1px solid var(--line); border-radius:8px;
+  background:var(--surface); border:1px solid var(--line); border-radius:8px;
 }
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm){
+  background:var(--surface); border:1px solid var(--line); border-top:4px solid var(--accent);
+  border-radius:8px; padding:.35rem .35rem .15rem;
+}
+.cm, .hm{ display:none; }
 .card-top{ display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .75rem; margin-bottom:.35rem; }
 .card-meta{ color:var(--muted); font-size:.95rem; }
 .diff{ display:inline-flex; align-items:center; gap:.4rem; color:var(--muted); font-size:.92rem; }
@@ -880,9 +802,13 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm){
 
 .pill{
   display:inline-block; padding:.1rem .6rem; border-radius:999px;
-  font-size:.85rem; font-weight:600; color:#000; background:var(--c, var(--muted));
+  font-size:.85rem; font-weight:600; color:#000000; background:var(--c, var(--muted));
 }
+.pill.ok{ background:transparent; color:var(--ok); border:1px solid var(--ok); }
 
+.acoes-marker{ display:none; }
+[data-testid="stElementContainer"]:has(.acoes-marker),
+.element-container:has(.acoes-marker){ display:none; }
 @media (max-width:640px){
   [data-testid="stHorizontalBlock"]:has(.acoes-marker){ flex-wrap:nowrap !important; gap:.35rem !important; }
   [data-testid="stHorizontalBlock"]:has(.acoes-marker) > [data-testid="stColumn"],
@@ -895,7 +821,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm){
 }
 
 /* ---------- Visão geral ---------- */
-.pre-item{ padding:.7rem 0; border-top:1px solid rgba(225,38,47,.35); }
+.pre-item{ padding:.7rem 0; border-top:1px solid var(--line); }
 .pre-item.first{ border-top:0; }
 .pre-title{ font-family:'Barlow Condensed','Barlow',sans-serif; font-size:1.35rem; font-weight:600; line-height:1.15; margin:.35rem 0 .1rem; }
 .pre-desc{ color:var(--muted); font-size:.98rem; line-height:1.4; }
@@ -906,6 +832,14 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm){
 .bar-fill{ display:block; height:100%; border-radius:5px; background:var(--c, var(--muted)); }
 .bar-n{ text-align:right; color:var(--muted); font-size:.95rem; font-variant-numeric:tabular-nums; }
 
+.week{ display:flex; gap:8px; height:150px; margin-top:.4rem; }
+.week .col{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; min-width:0; }
+.week .n{ color:var(--muted); font-size:.85rem; height:1rem; font-variant-numeric:tabular-nums; }
+.week .wrap{ flex:1; width:100%; display:flex; align-items:flex-end; }
+.week .wrap b{ display:block; width:100%; min-height:3px; border-radius:3px 3px 0 0; background:#444444; }
+.week .col.atual .wrap b{ background:var(--accent); }
+.week .d{ color:var(--muted); font-size:.8rem; white-space:nowrap; }
+
 .recente{ display:flex; flex-wrap:wrap; align-items:center; gap:.3rem .75rem; padding:.65rem .2rem; border-top:1px solid rgba(225,38,47,.35); }
 .recente:first-child{ border-top:0; }
 .recente .t{ font-weight:500; flex:1 1 220px; min-width:0; }
@@ -914,136 +848,110 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.cm){
 .vazio{ border:1px dashed var(--line); border-radius:8px; padding:1.6rem 1.4rem; color:var(--muted); line-height:1.5; }
 .vazio b{ color:var(--text); font-weight:600; }
 
-/* ---------- Indicadores ---------- */
-.kpi-card{
-  position:relative; box-sizing:border-box; min-height:105px; height:100%; padding:.75rem .85rem;
-  background:#000; border:1px solid rgba(225,38,47,.85); border-radius:10px;
-}
-.kpi-icon{ font-size:1.1rem; color:var(--accent-hi); margin-bottom:.25rem; }
-.kpi-value{ font-family:'Barlow Condensed','Barlow',sans-serif; font-size:2rem; font-weight:700; line-height:1.05; color:#fff; }
-.kpi-label{ font-size:.88rem; color:var(--muted); margin-top:.25rem; }
-@media (max-width:640px){
-  [data-testid="stHorizontalBlock"]:has(.kpi-card){ gap:.6rem !important; }
-  [data-testid="stHorizontalBlock"]:has(.kpi-card) > [data-testid="stColumn"],
-  [data-testid="stHorizontalBlock"]:has(.kpi-card) > [data-testid="column"]{
-    min-width:calc(50% - .3rem) !important; flex:1 1 calc(50% - .3rem) !important;
-  }
-  .kpi-card{ min-height:92px; }
-}
-
 /* ---------- Calendário de treinos ---------- */
-.cal-month{
-  font-family:'Barlow Condensed','Barlow',sans-serif; font-size:1.6rem; font-weight:700;
-  text-align:center; line-height:2.4rem; text-transform:capitalize; white-space:nowrap;
+.cal-shell{background:#050505;border:1px solid rgba(225,38,47,.7);border-radius:10px;padding:1rem;animation:neonBoxe 4.5s ease-in-out infinite;}
+.cal-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:1rem;}
+.cal-month{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:1.6rem;font-weight:700;text-transform:capitalize;}
+.cal-legend{display:flex;gap:1rem;flex-wrap:wrap;color:var(--muted);font-size:.88rem;margin:.6rem 0 .2rem;}
+.cal-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#E1262F;margin-right:.35rem;}
+.cal-dot.today{background:#F5F5F5;}
+.cal-note{color:var(--muted);font-size:.9rem;margin:.5rem 0 0;}
+.kpi-card{
+  box-sizing:border-box; min-height:105px; height:100%; padding:.75rem .85rem;
+  background:#000 !important; border:1px solid #E1262F !important; border-radius:10px;
+  box-shadow:0 0 6px rgba(225,38,47,.24), inset 0 0 3px rgba(225,38,47,.06);
+  animation:neonFrame 2.8s ease-in-out infinite;
 }
-@media (max-width:640px){ .cal-month{ font-size:1.15rem; } }
-.cal-dow{ text-align:center; color:var(--muted); font-size:.78rem; font-weight:700; padding:.25rem 0 .4rem; }
-.cal-vazio{ height:2.7rem; }
-.cal-legend{ display:flex; gap:1.1rem; flex-wrap:wrap; color:var(--muted); font-size:.9rem; margin:.7rem 0 .15rem; }
-.cal-legend i{ display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:.4rem; vertical-align:-1px; }
-.cal-legend i.treino{ background:var(--accent); }
-.cal-legend i.hoje{ background:transparent; box-shadow:inset 0 0 0 2px #fff; }
-.cal-resumo{ color:var(--muted); font-size:.92rem; margin-top:.35rem; }
-.cal-resumo b{ color:var(--text); font-weight:600; }
+.kpi-icon{font-size:1.1rem;color:#FF303A;margin-bottom:.25rem;}
+.kpi-value{font-family:'Barlow Condensed','Barlow',sans-serif;font-size:2rem;font-weight:700;line-height:1.05;color:#fff;}
+.kpi-label{font-size:.88rem;color:var(--muted);margin-top:.25rem;}
+/* Bordas neon animadas nos quadros marcados: calendário, antes do sparring e últimos registros.
+   Mantém todos os textos auxiliares na cor cinza definida em --muted. */
+@keyframes neonFrame {
+  0%, 100% {
+    border-color: rgba(225,38,47,.88) !important;
+    outline-color: rgba(225,38,47,.72) !important;
+    box-shadow: 0 0 5px rgba(225,38,47,.20), inset 0 0 3px rgba(225,38,47,.06) !important;
+  }
+  50% {
+    border-color: rgba(255,48,58,1) !important;
+    outline-color: rgba(255,48,58,.95) !important;
+    box-shadow: 0 0 12px rgba(225,38,47,.42), inset 0 0 5px rgba(225,38,47,.12) !important;
+  }
+}
+/* Streamlit varia a estrutura do container entre versões; estilizamos o wrapper e o painel interno. */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card),
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div {
+  background: #050505 !important;
+  border: 1px solid rgba(225,38,47,.88) !important;
+  outline: 1px solid rgba(225,38,47,.55) !important;
+  outline-offset: -2px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 0 6px rgba(225,38,47,.22) !important;
+  animation: neonFrame 3.2s ease-in-out infinite !important;
+}
+/* Fallback para versões que desenham a borda no bloco interno, não no wrapper. */
+div[data-testid="stVerticalBlock"]:has(.calendar-marker),
+div[data-testid="stVerticalBlock"]:has(.recentes-marker),
+div[data-testid="stVerticalBlock"]:has(.hm) {
+  border-color: rgba(225,38,47,.88) !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.hm) > div {
+  padding: .4rem !important;
+}
+/* Os cards KPI têm borda aplicada diretamente no HTML (.kpi-card),
+   sem depender do wrapper nativo de borda do Streamlit. */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) {
+  border:0 !important; outline:0 !important; box-shadow:none !important;
+  background:transparent !important; padding:0 !important; animation:none !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card) > div > div {
+  border:0 !important; outline:0 !important; background:transparent !important;
+  box-shadow:none !important; padding:0 !important;
+}
+div[data-testid="stHorizontalBlock"]:has(.calendar-marker){gap:.35rem;}
+.calendar-marker,.recentes-marker{display:none;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.calendar-marker) .stButton button{min-height:2.7rem;padding:.25rem;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) .recente:first-of-type{border-top:0;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.recentes-marker) .recente .d{color:var(--muted);}
 """
-
-
-def _fundo_em_base64():
-    """Lê boxing_background.png, reduz e comprime (evita mandar vários MB a cada clique)."""
-    caminho = Path(__file__).resolve().parent / ARQUIVO_FUNDO
-
-    if not caminho.exists():
-        return "", ""
-
-    try:
-        from PIL import Image
-
-        with Image.open(caminho) as imagem:
-            imagem = imagem.convert("RGB")
-            imagem.thumbnail((1920, 1080))
-            saida = io.BytesIO()
-            imagem.save(saida, "JPEG", quality=72, optimize=True, progressive=True)
-        return base64.b64encode(saida.getvalue()).decode("ascii"), "image/jpeg"
-    except Exception:
+    # Fundo cinematográfico: mantenha boxing_background.png na mesma pasta do app.py.
+    # Se a imagem não existir, o aplicativo continua funcionando com fundo preto.
+    caminho_fundo = Path(__file__).resolve().parent / "boxing_background.png"
+    if caminho_fundo.exists():
         try:
-            return base64.b64encode(caminho.read_bytes()).decode("ascii"), "image/png"
+            imagem_b64 = base64.b64encode(caminho_fundo.read_bytes()).decode("ascii")
+            regra_fundo = (
+                ".stApp{"
+                "background-color:#000 !important;"
+                f"background-image:linear-gradient(rgba(0,0,0,.66),rgba(0,0,0,.72)),"
+                f"url('data:image/png;base64,{imagem_b64}') !important;"
+                "background-position:center center !important;"
+                "background-size:cover !important;"
+                "background-attachment:fixed !important;"
+                "background-repeat:no-repeat !important;"
+                "color:var(--text);}"
+                "[data-testid='stAppViewContainer']{background:transparent !important;}"
+                "section[data-testid='stSidebar']{background:rgba(0,0,0,.88) !important;}"
+                "[data-testid='stMain']{background:transparent !important;}"
+            )
+            base = base.replace(
+                ".stApp{ background:var(--bg); color:var(--text); }",
+                regra_fundo
+            )
         except Exception:
-            return "", ""
+            pass
 
-
-@st.cache_data(show_spinner=False)
-def montar_css():
-    """CSS completo do app. Fica em cache: só é montado uma vez por servidor."""
-    # Fita colorida lateral dos cartões e cor das pílulas, por tipo
-    por_tipo = ""
-    for info in TIPOS_INFO.values():
-        classe, cor = info["css"], info["cor"]
-        por_tipo += (
-            f".{classe}{{--c:{cor};}}"
-            f"div[data-testid='stVerticalBlockBorderWrapper']:has(.cm.{classe})"
-            f"{{border-left:5px solid {cor} !important;}}"
-        )
-
-    # Painéis neon: borda fixa + um brilho que pulsa só em opacidade
-    # (barato para o navegador; animar box-shadow redesenha a tela inteira).
-    seletores = ",".join(
-        f"div[data-testid='stVerticalBlockBorderWrapper']:has(.{m})" for m in PAINEIS_NEON
-    )
-    brilho = ",".join(
-        f"div[data-testid='stVerticalBlockBorderWrapper']:has(.{m})::after" for m in PAINEIS_NEON
-    )
-    paineis = (
-        "@keyframes pulsoNeon{0%,100%{opacity:.35}50%{opacity:1}}"
-        f"{seletores}{{position:relative;background:rgba(5,5,5,.86) !important;"
-        "border:1px solid rgba(225,38,47,.75) !important;border-radius:10px !important;}"
-        f"{brilho}{{content:'';position:absolute;inset:-1px;border-radius:inherit;"
-        "pointer-events:none;box-shadow:0 0 12px rgba(225,38,47,.5), inset 0 0 8px rgba(225,38,47,.12);"
-        "opacity:.35;animation:pulsoNeon 3.6s ease-in-out infinite;}"
-        ".kpi-card::after{content:'';position:absolute;inset:-1px;border-radius:inherit;"
-        "pointer-events:none;box-shadow:0 0 10px rgba(225,38,47,.45);"
-        "opacity:.35;animation:pulsoNeon 3.6s ease-in-out infinite;}"
-        "div[data-testid='stVerticalBlockBorderWrapper']:has(.hm){padding:.35rem .35rem .15rem;}"
-        "@media (prefers-reduced-motion: reduce){"
-        f"{brilho},.kpi-card::after{{animation:none;opacity:.6;}}}}"
-    )
-
-    # Calendário: botões dos dias, hoje, e os 7 dias lado a lado no celular
-    hoje_ = (
-        ".element-container:has(.d-hoje) + .element-container button,"
-        "[data-testid='stElementContainer']:has(.d-hoje) + [data-testid='stElementContainer'] button"
-    )
-    calendario = (
-        f"{CALENDARIO} [data-testid='stHorizontalBlock']{{gap:.35rem;}}"
-        f"{CALENDARIO} .stButton button{{min-height:2.7rem;padding:.2rem 0;font-weight:600;"
-        "font-variant-numeric:tabular-nums;}"
-        f"{CALENDARIO} .stButton button p{{font-size:.98rem;overflow:visible;"
-        "text-overflow:clip;white-space:nowrap;}"
-        f"{CALENDARIO} .stButton button[kind='primary'],"
-        f"{CALENDARIO} .stButton button[data-testid='stBaseButton-primary']"
-        "{box-shadow:0 0 8px rgba(225,38,47,.45);}"
-        f"{CALENDARIO} .stButton button:disabled{{opacity:.35;}}"
-        f"{hoje_}{{box-shadow:inset 0 0 0 2px #fff !important;}}"
-        "@media (max-width:640px){"
-        f"{CALENDARIO} [data-testid='stHorizontalBlock']{{flex-wrap:nowrap !important;gap:.25rem !important;}}"
-        f"{CALENDARIO} [data-testid='stColumn'],{CALENDARIO} [data-testid='column']"
-        "{min-width:0 !important;}}"
-    )
-
-    # Fundo cinematográfico (opcional)
-    fundo = ""
-    imagem_b64, mime = _fundo_em_base64()
-    if imagem_b64:
-        fundo = (
-            ".stApp{background-color:#000 !important;"
-            "background-image:linear-gradient(rgba(0,0,0,.66),rgba(0,0,0,.72)),"
-            f"url('data:{mime};base64,{imagem_b64}') !important;"
-            "background-position:center center !important;background-size:cover !important;"
-            "background-attachment:fixed !important;background-repeat:no-repeat !important;}"
-            "[data-testid='stAppViewContainer'],[data-testid='stMain']{background:transparent !important;}"
-            "@media (max-width:640px){.stApp{background-attachment:scroll !important;}}"
-        )
-
-    return "<style>" + CSS_BASE + fundo + por_tipo + paineis + calendario + "</style>"
+    return "<style>" + base + por_tipo + "</style>"
 
 
 # ============================================================
@@ -1056,8 +964,10 @@ def html_pilula(tipo):
 
 
 def html_dificuldade(dificuldade):
-    nivel = PESO_DIFICULDADE.get(dificuldade, 2)
-    barras = "".join(f'<i class="{"on" if k < nivel else ""}"></i>' for k in range(3))
+    nivel = {"Fácil": 1, "Médio": 2, "Difícil": 3}.get(dificuldade, 2)
+    barras = "".join(
+        f'<i class="{"on" if k < nivel else ""}"></i>' for k in range(3)
+    )
     return f'<span class="diff"><span class="pips">{barras}</span>{escape(dificuldade)}</span>'
 
 
@@ -1115,7 +1025,9 @@ def barra_lateral():
                 type="primary" if st.session_state.pagina == nome else "secondary",
                 **LARGURA_BTN,
             ):
-                ir_para(nome)
+                st.session_state.pagina = nome
+                st.session_state.editando_id = None
+                st.session_state.excluindo_id = None
                 st.rerun()
 
         st.markdown('<div class="side-title">Dados</div>', unsafe_allow_html=True)
@@ -1137,13 +1049,6 @@ def barra_lateral():
         if st.session_state.erro_conexao and st.session_state.estado_nuvem != "sem_config":
             st.markdown(
                 f'<div class="sync-erro">{escape(st.session_state.erro_conexao)}</div>',
-                unsafe_allow_html=True,
-            )
-
-        if github_configurado() and not _segredo("APP_PASSWORD", ""):
-            st.markdown(
-                '<div class="sync-erro">Sem senha: qualquer pessoa com o link do app '
-                "pode ver e editar o caderno. Defina APP_PASSWORD nos Secrets.</div>",
                 unsafe_allow_html=True,
             )
 
@@ -1307,10 +1212,14 @@ def validar_campos(campos):
     return ""
 
 
-def formulario_novo(chave, tipo_padrao=None, expandido=False, data_padrao="", rotulo="Novo registro"):
-    base = {**VALORES_PADRAO, "tipo": tipo_padrao or "Dica", "data": data_padrao}
+def formulario_novo(chave, tipo_padrao=None, expandido=False, data_padrao=None):
+    base = {
+        **VALORES_PADRAO,
+        "tipo": tipo_padrao or "Dica",
+        "data": data_padrao or "",
+    }
 
-    with st.expander(rotulo, expanded=expandido):
+    with st.expander("Novo registro", expanded=expandido):
         with st.form(f"form_novo_{chave}", clear_on_submit=True):
             campos = campos_do_registro(f"novo_{chave}", base)
             enviar = st.form_submit_button("Adicionar ao caderno", type="primary", **LARGURA_BTN)
@@ -1365,6 +1274,7 @@ def cartao_registro(registro, chave):
             formulario_edicao(registro, chave)
             return
 
+        # Topo: tipo, categoria, dificuldade e data
         estrela = '<span class="fav">★</span>' if registro["favorito"] else ""
         data_html = (
             f'<span class="card-date">{formatar_data(registro["data"])}</span>'
@@ -1453,127 +1363,33 @@ def acoes_do_cartao(registro, chave):
             st.rerun()
 
 
-# ============================================================
-# LISTAGEM COM FILTROS
-# ============================================================
-
-def aplicar_filtros(df, busca, categoria, dificuldade, so_favoritos, tipo, ordem):
-    resultado = df.assign(_pos=df.index)
-
-    if tipo != "Todos":
-        resultado = resultado[resultado["tipo"] == tipo]
-    if categoria != "Todas":
-        resultado = resultado[resultado["categoria"] == categoria]
-    if dificuldade != "Todas":
-        resultado = resultado[resultado["dificuldade"] == dificuldade]
-    if so_favoritos:
-        resultado = resultado[resultado["favorito"]]
-
-    termos = normalizar_texto(busca).split()
-    if termos and len(resultado):
-        palheiro = (
-            resultado["titulo"] + " " + resultado["descricao"] + " "
-            + resultado["categoria"] + " " + resultado["fonte"] + " "
-            + resultado["tipo"]
-        ).map(normalizar_texto)
-        mascara = pd.Series(True, index=resultado.index)
-        for termo in termos:
-            mascara &= palheiro.str.contains(termo, regex=False)
-        resultado = resultado[mascara]
-
-    if ordem == "Mais antigos":
-        resultado = resultado.sort_values(["data", "_pos"])
-    elif ordem == "Título (A a Z)":
-        resultado = resultado.assign(_t=resultado["titulo"].map(normalizar_texto)).sort_values("_t")
-    elif ordem == "Mais difíceis primeiro":
-        resultado = resultado.assign(_d=resultado["dificuldade"].map(PESO_DIFICULDADE)).sort_values(
-            ["_d", "_pos"], ascending=[False, False]
-        )
-    elif ordem == "Favoritos primeiro":
-        resultado = resultado.sort_values(["favorito", "_pos"], ascending=[False, False])
-    else:
-        resultado = resultado.sort_values(["data", "_pos"], ascending=[False, False])
-
-    return resultado
-
-
-def lista_de_registros(df_base, chave, filtrar_tipo=False, vazio=None):
-    """Mostra filtros e cartões para o DataFrame recebido."""
-    if len(df_base) == 0:
-        titulo, texto = vazio or ("Nada por aqui ainda.", "Adicione um registro no botão acima.")
-        estado_vazio(titulo, texto)
-        return
-
-    busca = st.text_input(
-        "Buscar",
-        placeholder="Buscar por título, descrição, fonte ou categoria",
-        label_visibility="collapsed",
-        key=f"busca_{chave}",
-    )
-
-    posicoes = iter(st.columns([2, 2, 2, 2, 2] if filtrar_tipo else [2, 2, 2, 2]))
-
-    tipo = "Todos"
-    if filtrar_tipo:
-        with next(posicoes):
-            tipo = st.selectbox("Tipo", ["Todos"] + TIPOS, key=f"tipo_{chave}")
-    with next(posicoes):
-        categorias = ["Todas"] + sorted(c for c in df_base["categoria"].unique() if c)
-        categoria = st.selectbox("Categoria", categorias, key=f"cat_{chave}")
-    with next(posicoes):
-        dificuldade = st.selectbox("Dificuldade", ["Todas"] + DIFICULDADES, key=f"dif_{chave}")
-    with next(posicoes):
-        ordem = st.selectbox("Ordenar por", ORDENACOES, key=f"ord_{chave}")
-
-    so_favoritos = st.toggle("Só favoritos", key=f"fav_{chave}")
-
-    resultado = aplicar_filtros(df_base, busca, categoria, dificuldade, so_favoritos, tipo, ordem)
-
-    st.caption(plural(len(resultado), "registro encontrado", "registros encontrados"))
-
-    if len(resultado) == 0:
-        estado_vazio("Nenhum registro com esses filtros.", "Limpe a busca ou escolha outras opções.")
-        return
-
-    chave_limite = f"limite_{chave}"
-    limite = st.session_state.get(chave_limite, ITENS_POR_PAGINA)
-
-    for _, registro in resultado.head(limite).iterrows():
-        cartao_registro(registro, chave)
-
-    if len(resultado) > limite:
-        restantes = len(resultado) - limite
-        if st.button(f"Mostrar mais ({restantes})", key=f"mais_{chave}", **LARGURA_BTN):
-            st.session_state[chave_limite] = limite + ITENS_POR_PAGINA
-            st.rerun()
-
-
-# ============================================================
-# VISÃO GERAL
-# ============================================================
-
 def pagina_visao_geral():
     df = st.session_state.df
-    data_extenso = data_por_extenso(hoje())
+    agora_ = agora()
+    data_extenso = (
+        f"{DIAS_SEMANA[agora_.weekday()].capitalize()}, "
+        f"{agora_.day} de {MESES[agora_.month - 1]}"
+    )
 
     if len(df) == 0:
-        cabecalho_pagina("Caderno tático de boxe", f"{data_extenso}.")
+        cabecalho_pagina("Caderno tático de boxe", data_extenso)
         estado_vazio(
             "Seu caderno está vazio.",
             "Registre a primeira dica, combo ou correção do professor. "
             "Depois do primeiro sparring, anote os erros: eles aparecem aqui "
-            "para você rever antes do próximo. Para começar a contar seus treinos, "
-            "toque num dia do calendário.",
+            "para você rever antes do próximo.",
         )
         formulario_novo("visao", expandido=True)
-    else:
-        cabecalho_pagina(
-            "Caderno tático de boxe",
-            f"{data_extenso}. {plural(len(df), 'registro', 'registros')}, "
-            f"{plural(int(df['favorito'].sum()), 'favorito', 'favoritos')}.",
-        )
-        formulario_novo("visao")
-        bloco_indicadores(df)
+        return
+
+    cabecalho_pagina(
+        "Caderno tático de boxe",
+        f"{data_extenso}. {plural(len(df), 'registro', 'registros')}, "
+        f"{plural(int(df['favorito'].sum()), 'favorito', 'favoritos')}. ",
+    )
+
+    formulario_novo("visao")
+    bloco_indicadores(df)
 
     esquerda, direita = st.columns([3, 2], gap="large")
 
@@ -1582,30 +1398,33 @@ def pagina_visao_geral():
         bloco_recentes(df)
 
     with direita:
+        # O calendário fica acima de "Por tipo", conforme solicitado.
         bloco_calendario_treinos(df)
-        if len(df):
-            bloco_por_tipo(df)
-            bloco_por_categoria(df)
+        bloco_por_tipo(df)
+        bloco_por_categoria(df)
 
 
 def bloco_indicadores(df):
-    """Cards-resumo rápidos."""
+    """Cards-resumo rápidos para a visão geral."""
     mes_atual = hoje().strftime("%Y-%m")
-    dias_no_mes = sum(1 for d in datas_de_treino(df) if d.startswith(mes_atual))
-
+    treinos_mes = df[(df["tipo"] == "Treino") & df["data"].astype(str).str.startswith(mes_atual)]
+    combos = int((df["tipo"] == "Combo").sum())
+    revisoes = int(df["tipo"].isin(TIPOS_REVISAO).sum())
+    favoritos = int(df["favorito"].sum())
     cards = [
-        ("🥊", "Dias treinados neste mês", dias_no_mes),
-        ("⚡", "Combos anotados", int((df["tipo"] == "Combo").sum())),
-        ("🎯", "Revisões de sparring", int(df["tipo"].isin(TIPOS_REVISAO).sum())),
-        ("★", "Favoritos", int(df["favorito"].sum())),
+        ("🥊", "Treinos neste mês", len(treinos_mes)),
+        ("⚡", "Combos anotados", combos),
+        ("🎯", "Revisões de sparring", revisoes),
+        ("★", "Favoritos", favoritos),
     ]
-
-    for coluna, (icone, rotulo, valor) in zip(st.columns(4, gap="small"), cards):
-        with coluna:
+    cols = st.columns(4, gap="small")
+    for col, (icone, rotulo, valor) in zip(cols, cards):
+        with col:
+            # A borda fica no próprio HTML, não no container nativo do Streamlit.
+            # Assim o contorno vermelho neon não é substituído pela borda cinza padrão.
             st.markdown(
                 f'<div class="kpi-card"><div class="kpi-icon">{icone}</div>'
-                f'<div class="kpi-value">{valor}</div>'
-                f'<div class="kpi-label">{escape(rotulo)}</div></div>',
+                f'<div class="kpi-value">{valor}</div><div class="kpi-label">{escape(rotulo)}</div></div>',
                 unsafe_allow_html=True,
             )
 
@@ -1627,7 +1446,7 @@ def bloco_antes_do_sparring(df):
         if len(pendentes) == 0:
             st.markdown(
                 '<div class="pre-desc" style="padding:.6rem .4rem">'
-                "Nada para revisar. Depois do próximo sparring, registre o que deu errado "
+                "Nada pendente. Depois do próximo sparring, registre o que deu errado "
                 "como <b>Erro no Sparring</b> e ele aparece aqui.</div>",
                 unsafe_allow_html=True,
             )
@@ -1642,13 +1461,17 @@ def bloco_antes_do_sparring(df):
             )
 
         if len(pendentes) > 4:
-            st.caption(f"Mais {len(pendentes) - 4} nas páginas de erros e correções.")
+            st.caption(f"Mais {len(pendentes) - 4} pendentes nas páginas de erros e correções.")
+
+
+def _suporta_alinhamento():
+    try:
+        return "vertical_alignment" in inspect.signature(st.columns).parameters
+    except Exception:
+        return False
 
 
 def bloco_recentes(df):
-    if len(df) == 0:
-        return
-
     secao("Últimos registros")
 
     recentes = df.assign(_pos=df.index).sort_values(
@@ -1688,11 +1511,90 @@ def bloco_por_tipo(df):
     st.markdown(linhas, unsafe_allow_html=True)
 
 
+def bloco_calendario_treinos(df):
+    """Calendário mensal: dias com treino são destacados e abrem os registros daquele dia."""
+    secao("Calendário de treinos", "Toque em um dia para abrir ou registrar o treino daquela data.")
+
+    with st.container(border=True):
+        st.markdown('<span class="calendar-marker"></span>', unsafe_allow_html=True)
+        mes = st.session_state.mes_calendario
+        c_prev, c_mes, c_next = st.columns([1, 4, 1])
+        with c_prev:
+            if st.button("‹", key="cal_mes_anterior", help="Mês anterior", **LARGURA_BTN):
+                anterior = mes.replace(day=1) - timedelta(days=1)
+                st.session_state.mes_calendario = anterior.replace(day=1)
+                st.rerun()
+        with c_mes:
+            st.markdown(
+                f'<div class="cal-head"><div class="cal-month">{MESES[mes.month - 1]} {mes.year}</div></div>',
+                unsafe_allow_html=True,
+            )
+        with c_next:
+            if st.button("›", key="cal_proximo_mes", help="Próximo mês", **LARGURA_BTN):
+                proximo = mes.replace(day=28) + timedelta(days=4)
+                st.session_state.mes_calendario = proximo.replace(day=1)
+                st.rerun()
+
+        treinos = df[(df["tipo"] == "Treino") & (df["data"] != "")]
+        datas_com_treino = set(treinos["data"].tolist())
+        dias = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
+        cols = st.columns(7, gap="small")
+        for col, dia_semana in zip(cols, dias):
+            with col:
+                st.markdown(
+                    f'<div style="text-align:center;color:#A7A7A7;font-size:.78rem;font-weight:700;padding:.25rem 0 .5rem">{dia_semana}</div>',
+                    unsafe_allow_html=True,
+                )
+
+        primeiro_dia_semana, total_dias = calendar.monthrange(mes.year, mes.month)
+        semanas = (primeiro_dia_semana + total_dias + 6) // 7
+        dia_atual = hoje()
+        dia_numero = 1
+
+        for semana in range(semanas):
+            cols = st.columns(7, gap="small")
+            for coluna in range(7):
+                indice_dia = semana * 7 + coluna
+                with cols[coluna]:
+                    if indice_dia < primeiro_dia_semana or dia_numero > total_dias:
+                        st.markdown('<div style="height:2.7rem"></div>', unsafe_allow_html=True)
+                        continue
+
+                    data_dia = date(mes.year, mes.month, dia_numero)
+                    iso = data_dia.isoformat()
+                    tem_treino = iso in datas_com_treino
+                    eh_hoje = data_dia == dia_atual
+                    rotulo = f'🥊 {dia_numero}' if tem_treino else str(dia_numero)
+                    if eh_hoje:
+                        rotulo = f'• {rotulo}'
+                    ajuda = "Abrir treino registrado" if tem_treino else "Registrar treino neste dia"
+                    if st.button(
+                        rotulo,
+                        key=f"cal_dia_{iso}",
+                        help=f"{data_dia:%d/%m/%Y} — {ajuda}",
+                        type="primary" if tem_treino else "secondary",
+                        **LARGURA_BTN,
+                    ):
+                        st.session_state.data_treino_selecionada = iso
+                        st.session_state.pagina = "Treinos"
+                        st.session_state.editando_id = None
+                        st.session_state.excluindo_id = None
+                        st.rerun()
+                    dia_numero += 1
+
+        st.markdown(
+            '<div class="cal-legend"><span><i class="cal-dot"></i>Dia com treino (🥊)</span>'
+            '<span><i class="cal-dot today"></i>Hoje (•)</span></div>'
+            '<div class="cal-note">Os dias marcados com 🥊 já possuem pelo menos um registro do tipo Treino.</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def bloco_por_categoria(df):
     secao("Categorias mais anotadas")
 
     contagem = df["categoria"].value_counts().head(5)
-    maximo = max(int(contagem.max()), 1) if len(contagem) else 1
+    maximo = max(int(contagem.max()), 1)
 
     linhas = ""
     for categoria, n in contagem.items():
@@ -1706,113 +1608,86 @@ def bloco_por_categoria(df):
     st.markdown(linhas, unsafe_allow_html=True)
 
 
-# ============================================================
-# CALENDÁRIO DE TREINOS
-# ============================================================
-
-def mudar_mes(mes, deslocamento):
-    """Primeiro dia do mês anterior (-1) ou seguinte (+1)."""
-    if deslocamento < 0:
-        return (mes - timedelta(days=1)).replace(day=1)
-    return (mes.replace(day=28) + timedelta(days=4)).replace(day=1)
-
-
-def bloco_calendario_treinos(df):
-    """Mês em grade: dias treinados em vermelho; tocar num dia abre o treino daquela data."""
-    secao("Calendário de treinos", "Toque num dia para abrir ou registrar o treino daquela data.")
-
-    mes = st.session_state.mes_calendario
-    hoje_ = hoje()
-    mes_de_hoje = hoje_.replace(day=1)
-    datas_treino = datas_de_treino(df)
-
-    with st.container(border=True):
-        st.markdown('<span class="calendar-marker"></span>', unsafe_allow_html=True)
-
-        # Navegação entre meses (não passa do mês atual)
-        c_ant, c_titulo, c_prox = st.columns([1, 4, 1])
-
-        with c_ant:
-            if st.button("‹", key="cal_mes_anterior", help="Mês anterior", **LARGURA_BTN):
-                st.session_state.mes_calendario = mudar_mes(mes, -1)
-                st.rerun()
-        with c_titulo:
-            st.markdown(
-                f'<div class="cal-month">{MESES[mes.month - 1]} {mes.year}</div>',
-                unsafe_allow_html=True,
-            )
-        with c_prox:
-            if st.button(
-                "›", key="cal_proximo_mes", help="Próximo mês",
-                disabled=mes >= mes_de_hoje, **LARGURA_BTN,
-            ):
-                st.session_state.mes_calendario = mudar_mes(mes, +1)
-                st.rerun()
-
-        # Cabeçalho dos dias da semana (semana começa na segunda)
-        for coluna, nome in zip(st.columns(7, gap="small"), ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]):
-            with coluna:
-                st.markdown(f'<div class="cal-dow">{nome}</div>', unsafe_allow_html=True)
-
-        for semana in calendar.Calendar(firstweekday=0).monthdayscalendar(mes.year, mes.month):
-            for coluna, dia in zip(st.columns(7, gap="small"), semana):
-                with coluna:
-                    if dia == 0:
-                        st.markdown('<div class="cal-vazio"></div>', unsafe_allow_html=True)
-                        continue
-
-                    data_dia = date(mes.year, mes.month, dia)
-                    iso = data_dia.isoformat()
-                    tem_treino = iso in datas_treino
-
-                    if data_dia == hoje_:
-                        st.markdown('<span class="d-marca d-hoje"></span>', unsafe_allow_html=True)
-
-                    if st.button(
-                        str(dia),
-                        key=f"cal_dia_{iso}",
-                        help=f"{data_dia:%d/%m/%Y}: " + (
-                            "abrir treino registrado" if tem_treino else "registrar treino neste dia"
-                        ),
-                        type="primary" if tem_treino else "secondary",
-                        disabled=data_dia > hoje_,
-                        **LARGURA_BTN,
-                    ):
-                        ir_para("Treinos", data_treino=iso)
-                        st.rerun()
-
-        dias_no_mes = sum(1 for d in datas_treino if d.startswith(f"{mes.year}-{mes.month:02d}"))
-        sequencia = sequencia_de_treinos(datas_treino, hoje_)
-
-        junto = lambda texto: texto.replace(" ", "\u00a0")  # não quebra "2 dias" no meio
-        resumo = (
-            f"<b>{junto(plural(dias_no_mes, 'dia treinado', 'dias treinados'))}</b> em {MESES[mes.month - 1]}"
-        )
-        if sequencia and mes == mes_de_hoje:
-            resumo += f". Sequência atual: <b>{junto(plural(sequencia, 'dia', 'dias'))}</b>"
-
-        st.markdown(
-            '<div class="cal-legend"><span><i class="treino"></i>Dia treinado</span>'
-            '<span><i class="hoje"></i>Hoje</span></div>'
-            f'<div class="cal-resumo">{resumo}.</div>',
-            unsafe_allow_html=True,
-        )
-
-        if mes != mes_de_hoje:
-            if st.button("Voltar para o mês atual", key="cal_mes_atual", **LARGURA_BTN):
-                st.session_state.mes_calendario = mes_de_hoje
-                st.rerun()
-
-
-# ============================================================
-# PÁGINAS
-# ============================================================
-
 def subtitulo_dados(df):
-    return (
-        f"{plural(len(df), 'registro', 'registros')}, "
-        f"{plural(int(df['favorito'].sum()), 'favorito', 'favoritos')}"
+    """Resumo curto para os cabeçalhos das páginas."""
+    favoritos = int(df["favorito"].sum()) if "favorito" in df.columns else 0
+    return f"{plural(len(df), 'registro', 'registros')}, {plural(favoritos, 'favorito', 'favoritos')}"
+
+
+def lista_de_registros(df_base, chave, filtrar_tipo=False, vazio=None):
+    """Filtros e cartões de registros, sem o antigo campo/status 'Dominado'."""
+    if len(df_base) == 0:
+        titulo, texto = vazio or ("Nada por aqui ainda.", "Adicione um registro no botão acima.")
+        estado_vazio(titulo, texto)
+        return
+
+    busca = st.text_input(
+        "Buscar", placeholder="Buscar por título, descrição, fonte ou categoria",
+        label_visibility="collapsed", key=f"busca_{chave}"
     )
+    colunas = st.columns([2, 2, 2, 2, 2] if filtrar_tipo else [2, 2, 2, 2])
+    pos = iter(colunas)
+
+    tipo = "Todos"
+    if filtrar_tipo:
+        with next(pos):
+            tipo = st.selectbox("Tipo", ["Todos"] + TIPOS, key=f"tipo_{chave}")
+    with next(pos):
+        categorias = ["Todas"] + sorted(c for c in df_base["categoria"].unique() if c)
+        categoria = st.selectbox("Categoria", categorias, key=f"cat_{chave}")
+    with next(pos):
+        dificuldade = st.selectbox("Dificuldade", ["Todas"] + DIFICULDADES, key=f"dif_{chave}")
+    with next(pos):
+        ordem = st.selectbox(
+            "Ordenar por", ["Mais recentes", "Mais antigos", "Título (A a Z)", "Mais difíceis primeiro", "Favoritos primeiro"],
+            key=f"ord_{chave}"
+        )
+
+    so_favoritos = st.toggle("Só favoritos", key=f"fav_{chave}")
+    resultado = df_base.copy().assign(_pos=lambda x: x.index)
+
+    if tipo != "Todos":
+        resultado = resultado[resultado["tipo"] == tipo]
+    if categoria != "Todas":
+        resultado = resultado[resultado["categoria"] == categoria]
+    if dificuldade != "Todas":
+        resultado = resultado[resultado["dificuldade"] == dificuldade]
+    if so_favoritos:
+        resultado = resultado[resultado["favorito"]]
+    if busca.strip():
+        termos = normalizar_texto(busca).split()
+        texto_busca = (resultado["titulo"] + " " + resultado["descricao"] + " " + resultado["categoria"] + " " + resultado["fonte"] + " " + resultado["tipo"]).map(normalizar_texto)
+        mascara = pd.Series(True, index=resultado.index)
+        for termo in termos:
+            mascara &= texto_busca.str.contains(termo, regex=False, na=False)
+        resultado = resultado[mascara]
+
+    if ordem == "Mais antigos":
+        resultado = resultado.sort_values(["data", "_pos"], ascending=[True, True])
+    elif ordem == "Título (A a Z)":
+        resultado = resultado.assign(_t=resultado["titulo"].map(normalizar_texto)).sort_values("_t")
+    elif ordem == "Mais difíceis primeiro":
+        peso = {"Fácil": 1, "Médio": 2, "Difícil": 3}
+        resultado = resultado.assign(_d=resultado["dificuldade"].map(peso)).sort_values(["_d", "_pos"], ascending=[False, False])
+    elif ordem == "Favoritos primeiro":
+        resultado = resultado.sort_values(["favorito", "_pos"], ascending=[False, False])
+    else:
+        resultado = resultado.sort_values(["data", "_pos"], ascending=[False, False])
+
+    st.caption(plural(len(resultado), "registro encontrado", "registros encontrados"))
+    if resultado.empty:
+        estado_vazio("Nenhum registro com esses filtros.", "Limpe a busca ou escolha outras opções.")
+        return
+
+    chave_limite = f"limite_{chave}"
+    limite = st.session_state.get(chave_limite, ITENS_POR_PAGINA)
+    for _, registro in resultado.head(limite).iterrows():
+        cartao_registro(registro, chave)
+    if len(resultado) > limite:
+        restantes = len(resultado) - limite
+        if st.button(f"Mostrar mais ({restantes})", key=f"mais_{chave}", **LARGURA_BTN):
+            st.session_state[chave_limite] = limite + ITENS_POR_PAGINA
+            st.rerun()
 
 
 def pagina_caderno():
@@ -1827,74 +1702,47 @@ def pagina_caderno():
     )
 
 
-MENSAGENS_VAZIAS = {
-    "Combo": "Anote as sequências que você quer automatizar, como 'jab, direto, gancho de esquerda'.",
-    "Defesa": "Registre esquivas, bloqueios e contra-ataques que funcionam para você.",
-    "Erro no Sparring": "Depois de cada sparring, anote o que deu errado. Os erros aparecem na Visão geral, em 'Antes do sparring'.",
-    "Correção do Professor": "Anote cada correção que o professor fizer, enquanto ainda estiver fresca na memória.",
-    "Treino": "Registre seus treinos para acompanhar a evolução.",
-    "Dica": "Guarde dicas de técnica, estratégia e mentalidade.",
-}
-
-
-def pagina_treino_do_dia(df, iso):
-    """Treinos de uma data escolhida no calendário, com marcação rápida."""
-    dia = para_date(iso)
-    chave = f"treino_{iso}"
-    df_dia = df[(df["tipo"] == "Treino") & (df["data"] == iso)]
-
-    cabecalho_pagina(
-        f"Treino de {formatar_data(iso)}",
-        f"{data_por_extenso(dia)}. "
-        + (
-            plural(len(df_dia), "treino registrado", "treinos registrados")
-            if len(df_dia)
-            else "Nenhum treino registrado neste dia."
-        ),
-    )
-
-    if st.button("← Voltar para todos os treinos", key="voltar_todos_treinos"):
-        ir_para("Treinos")
-        st.rerun()
-
-    if len(df_dia) == 0:
-        estado_vazio(
-            "Treinou neste dia?",
-            "Marque o dia como treinado agora e complete os detalhes depois, ou registre o treino completo no formulário.",
-        )
-        if st.button("Marcar como treinado", key=f"marcar_{iso}", type="primary"):
-            marcar_dia_como_treinado(iso)
-            st.rerun()
-
-    formulario_novo(
-        chave,
-        tipo_padrao="Treino",
-        expandido=False,
-        data_padrao=iso,
-        rotulo="Registrar treino com detalhes" if len(df_dia) == 0 else "Adicionar outro treino neste dia",
-    )
-
-    for _, registro in df_dia.iterrows():
-        cartao_registro(registro, chave)
-
-
 def pagina_tipo(nome, tipo):
     df = st.session_state.df
-    data_selecionada = st.session_state.data_treino_selecionada if tipo == "Treino" else ""
-
-    if data_selecionada:
-        pagina_treino_do_dia(df, data_selecionada)
-        return
-
     df_tipo = df[df["tipo"] == tipo]
+    data_selecionada = st.session_state.get("data_treino_selecionada", "") if tipo == "Treino" else ""
 
-    cabecalho_pagina(nome, subtitulo_dados(df_tipo))
-    formulario_novo(f"tipo_{tipo}", tipo_padrao=tipo, expandido=len(df_tipo) == 0)
+    if tipo == "Treino" and data_selecionada:
+        df_tipo = df_tipo[df_tipo["data"] == data_selecionada]
+        data_legivel = formatar_data(data_selecionada)
+        cabecalho_pagina(f"Treino de {data_legivel}", "Registros vinculados ao dia selecionado no calendário.")
+        if st.button("← Voltar para todos os treinos", key="voltar_todos_treinos", **LARGURA_BTN):
+            st.session_state.data_treino_selecionada = ""
+            st.rerun()
+        formulario_novo(
+            f"tipo_{tipo}_{data_selecionada}",
+            tipo_padrao=tipo,
+            expandido=len(df_tipo) == 0,
+            data_padrao=data_selecionada,
+        )
+    else:
+        cabecalho_pagina(nome, subtitulo_dados(df_tipo))
+        formulario_novo(f"tipo_{tipo}", tipo_padrao=tipo, expandido=len(df_tipo) == 0)
 
+    mensagens_vazias = {
+        "Combo": "Anote as sequências que você quer automatizar, como 'jab, direto, gancho de esquerda'.",
+        "Defesa": "Registre esquivas, bloqueios e contra-ataques que funcionam para você.",
+        "Erro no Sparring": "Depois de cada sparring, anote o que deu errado. Os erros pendentes aparecem na Visão geral.",
+        "Correção do Professor": "Anote cada correção que o professor fizer, enquanto ainda estiver fresca na memória.",
+        "Treino": "Registre seus treinos para acompanhar a evolução.",
+        "Dica": "Guarde dicas de técnica, estratégia e mentalidade.",
+    }
+
+    chave_lista = f"tipo_{tipo}_{data_selecionada}" if tipo == "Treino" and data_selecionada else f"tipo_{tipo}"
+    texto_vazio = (
+        ("Nenhum treino registrado neste dia.", "Use o formulário acima para adicionar o treino desta data.")
+        if tipo == "Treino" and data_selecionada
+        else (f"Nenhum registro em {nome.lower()} ainda.", mensagens_vazias.get(tipo, ""))
+    )
     lista_de_registros(
         df_tipo,
-        f"tipo_{tipo}",
-        vazio=(f"Nenhum registro em {nome.lower()} ainda.", MENSAGENS_VAZIAS.get(tipo, "")),
+        chave_lista,
+        vazio=texto_vazio,
     )
 
 
@@ -1918,9 +1766,8 @@ def pagina_favoritos():
 # EXECUÇÃO
 # ============================================================
 
-st.markdown(montar_css(), unsafe_allow_html=True)
-exigir_senha()
 iniciar_estado()
+st.markdown(montar_css(), unsafe_allow_html=True)
 barra_lateral()
 mostrar_avisos()
 
